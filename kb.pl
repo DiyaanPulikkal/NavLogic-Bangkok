@@ -260,3 +260,27 @@ connects('Hua Mak (A4)', 'Ramkhamhaeng (A5)', 5).
 connects('Ramkhamhaeng (A5)', 'Makkasan (A6)', 5).
 connects('Makkasan (A6)', 'Ratchaprarop (A7)', 5).
 connects('Ratchaprarop (A7)', 'Phaya Thai (A8)', 5).
+
+/*
+--------------------------------------------------
+Inter-line connections
+--------------------------------------------------
+*/
+
+connects('Ha Yaek Lat Phrao (N9)', 'Phahon Yothin (BL14)', 10).
+connects('Mo Chit (N8)', 'Chatuchak Park (BL13)', 10).
+connects('Phaya Thai (N2)', 'Phaya Thai (A1)', 10).
+connects('Makkasan (A6)', 'Phetchaburi (BL21)', 10).
+connects('Asok (E4)', 'Sukhumvit (BL22)', 10).
+connects('Silom (BL26)', 'Sala Daeng (S2)', 10).
+connects('Krung Thon Buri (S7)', 'Krung Thon Buri (G1)', 10).
+connects('Bang Wa (S12)', 'Bang Wa (BL34)', 10).
+
+/*
+--------------------------------------------------
+Connection Logic
+--------------------------------------------------
+*/
+
+connects(A, B, Time):- connects(B, A, Time).
+
