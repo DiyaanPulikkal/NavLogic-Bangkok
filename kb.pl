@@ -112,7 +112,7 @@ station('Siam (CEN)', 'bts_silom').
 station('National Stadium (W1)', 'bts_silom').
 
 station('Ratchadamri (S1)', 'bts_silom').
-station('Saladaeng (S2)', 'bts_silom').
+station('Sala Daeng (S2)', 'bts_silom').
 station('Chong Nonsi (S3)', 'bts_silom').
 station('Saint Louis (S4)', 'bts_silom').
 station('Surasak (S5)', 'bts_silom').
@@ -127,8 +127,8 @@ station('Bang Wa (S12)', 'bts_silom').
 connects('Siam (CEN)', 'National Stadium (W1)', 2).
 
 connects('Siam (CEN)', 'Ratchadamri (S1)', 2).
-connects('Ratchadamri (S1)', 'Saladaeng (S2)', 2).
-connects('Saladaeng (S2)', 'Chong Nonsi (S3)', 2).
+connects('Ratchadamri (S1)', 'Sala Daeng (S2)', 2).
+connects('Sala Daeng (S2)', 'Chong Nonsi (S3)', 2).
 connects('Chong Nonsi (S3)', 'Saint Louis (S4)', 1).
 connects('Saint Louis (S4)', 'Surasak (S5)', 1).
 connects('Surasak (S5)', 'Saphan Taksin (S6)', 2).
@@ -282,5 +282,44 @@ Connection Logic
 --------------------------------------------------
 */
 
-connects(A, B, Time):- connects(B, A, Time).
+edge(A,B,T) :- connects(A,B,T).
+edge(A,B,T) :- connects(B,A,T).
 
+/*
+--------------------------------------------------
+Route Finding
+--------------------------------------------------
+*/
+
+route(Start, Goal, AnnotatedPath, Time) :-
+    ucs([0-[Start]], Goal, RevPath, Time),
+    reverse(RevPath, Path),
+    annotate_path(Path, AnnotatedPath)
+.
+
+ucs([Cost-[Goal|Rest] | _], Goal, [Goal|Rest], Cost) :- !.
+
+% Expand lowest-cost path
+ucs([Cost-[Current|Rest] | Others], Goal, Path, FinalCost) :-
+    findall(
+        NewCost-[Next,Current|Rest],
+        (
+            edge(Current, Next, TravelTime),
+            \+ member(Next, [Current|Rest]),
+            NewCost is Cost + TravelTime
+        ),
+        NewPaths
+    ),
+    append(Others, NewPaths, TempQueue),
+    keysort(TempQueue, SortedQueue),
+    ucs(SortedQueue, Goal, Path, FinalCost)
+.
+
+annotate_path([], []).
+
+annotate_path([Station|Rest], [[Station,Line]|AnnotatedRest]) :-
+    station(Station, Line),
+    annotate_path(Rest, AnnotatedRest)
+.
+
+    
