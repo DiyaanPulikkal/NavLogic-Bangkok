@@ -2,3 +2,4 @@ pyswip
 customtkinter
 python-dotenv
 openai
+pytest

@@ -1,3 +1,6 @@
 .venv
 .env
 Diagrams
+__pycache__
+*.pyc
+.pytest_cache
