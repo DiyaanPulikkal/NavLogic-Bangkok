@@ -278,6 +278,35 @@ connects('Bang Wa (S12)', 'Bang Wa (BL34)', 10).
 
 /*
 --------------------------------------------------
+Attractions
+--------------------------------------------------
+*/
+
+attraction('Siam Paragon').
+attraction('Central World').
+attraction('MBK Center').
+attraction('Lumpini Park').
+attraction('Chatuchak Weekend Market').
+attraction('Grand Palace').
+attraction('Wat Pho').
+attraction('Benchasiri Park').
+attraction('Victory Monument').
+attraction('Bangkok Chinatown').
+attraction('Queen Sirikit National Convention Centre').
+attraction('Asiatique The Riverfront').
+attraction('Suvarnabhumi Airport').
+attraction('Erawan Shrine').
+attraction('Jim Thompson House').
+attraction('Terminal 21').
+attraction('Benjakitti Park').
+attraction('Siam Center').
+attraction('Wat Traimit').
+attraction('Silom Night Market').
+attraction('Bangkok Art and Culture Centre').
+attraction('Samyan Mitrtown').
+
+/*
+--------------------------------------------------
 Connection Logic
 --------------------------------------------------
 */
