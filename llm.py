@@ -8,7 +8,7 @@ class LLMInterface:
     def __init__(self):
         self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         self.model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-        self.temperature = float(os.getenv("OPENAI_TEMPERATURE", 0))
+        self.temperature = float(os.getenv("OPENAI_TEMPERATURE", 1))
         with open("system_prompt.txt", "r") as f:
             self.system_prompt = f.read()
     
