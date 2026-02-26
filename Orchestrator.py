@@ -1,7 +1,7 @@
 import heapq
 import re
 
-from llm import LLMInterface
+from llms.llm import LLMInterface
 from prolog import PrologInterface
 
 
