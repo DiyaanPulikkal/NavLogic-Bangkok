@@ -1,7 +1,13 @@
+import logging
+
+from config import setup_logging
 from Orchestrator import Orchestrator
+
+logger = logging.getLogger("main")
 
 
 def main():
+    setup_logging()
     orchestrator = Orchestrator()
     print("Bangkok Public Transport Assistant")
     print("Type 'exit' or 'quit' to stop.\n")
@@ -19,7 +25,9 @@ def main():
             print("Goodbye!")
             break
 
+        logger.info('User input: "%s"', user_input)
         response = orchestrator.handle(user_input)
+        logger.info("Assistant response delivered (%d chars)", len(response))
         print(f"\nAssistant:\n{response}\n")
 
 

@@ -1,7 +1,10 @@
 import heapq
+import logging
 
 from llms.llm import LLMInterface
 from prolog import PrologInterface
+
+logger = logging.getLogger("orchestrator")
 
 
 LINE_DISPLAY_NAMES = {
@@ -21,12 +24,21 @@ PROLOG_QUERY_MAP = {
     'attraction_near_station': lambda args: f"attraction_near_station('{args['attraction_name']}', Station).",
 }
 
+# Keys in each function's arguments that hold station/location names needing resolution
+STATION_ARG_KEYS = {
+    'line_of':             ['station_name'],
+    'same_line':           ['station_a', 'station_b'],
+    'is_transfer_station': ['station_name'],
+    'needs_transfer':      ['station_a', 'station_b'],
+}
+
 
 class Orchestrator:
     def __init__(self):
         self.llm = LLMInterface()
         self.prolog = PrologInterface()
         self._station_lines_cache = None
+        self._all_stations_cache = None
 
     def handle(self, user_input: str) -> str:
         result = self.llm.translate_to_query(user_input)
@@ -34,19 +46,81 @@ class Orchestrator:
             return "Sorry, I couldn't process your request."
 
         function_name, arguments = result
+        logger.info("Dispatching: %s", function_name)
 
-        # Route finding → Python Dijkstra
+        # Route finding → resolve names then Python Dijkstra
         if function_name == 'find_route':
-            return self._find_and_format_route(arguments['start'], arguments['end'])
+            start_raw = arguments['start']
+            end_raw = arguments['end']
 
-        # Knowledge-base queries → Prolog
+            start = self._resolve_location(start_raw)
+            if start is None:
+                return f"Unknown location: '{start_raw}'."
+            end = self._resolve_location(end_raw)
+            if end is None:
+                return f"Unknown location: '{end_raw}'."
+
+            logger.info("Running Dijkstra from '%s' to '%s'", start, end)
+            return self._find_and_format_route(start, end)
+
+        # Knowledge-base queries → resolve station names, then Prolog
+        if function_name in STATION_ARG_KEYS:
+            for key in STATION_ARG_KEYS[function_name]:
+                raw = arguments[key]
+                resolved = self._resolve_location(raw)
+                if resolved is None:
+                    return f"Unknown location: '{raw}'."
+                arguments[key] = resolved
+
         query_builder = PROLOG_QUERY_MAP.get(function_name)
         if query_builder is None:
             return f"Unknown function: {function_name}"
 
         prolog_query = query_builder(arguments)
+        logger.info("Prolog query: %s", prolog_query)
         prolog_result = self.prolog.query(prolog_query)
+        logger.info("Prolog result: %s", prolog_result)
         return self._format_prolog_result(prolog_result)
+
+    # ------------------------------------------------------------------
+    # Name resolution
+    # ------------------------------------------------------------------
+
+    def _resolve_location(self, raw_name: str) -> str | None:
+        """Resolve a raw user-provided name to an exact station name.
+
+        1. Try Prolog resolve_location (handles attractions and exact station names)
+        2. Fallback: case-insensitive substring match against all station names
+        """
+        # Try Prolog first (exact attraction or station match)
+        resolved = self.prolog.resolve_location(raw_name)
+        if resolved:
+            return resolved
+
+        # Fallback: fuzzy substring match
+        all_stations = self._get_all_stations()
+        raw_lower = raw_name.lower()
+
+        # Try substring match (e.g. "Siam" matches "Siam (CEN)")
+        matches = [s for s in all_stations if raw_lower in s.lower()]
+        if len(matches) == 1:
+            logger.info("Fuzzy matched '%s' → '%s'", raw_name, matches[0])
+            return matches[0]
+
+        # If multiple matches, try matching just the name part before the code
+        if len(matches) > 1:
+            exact = [s for s in matches if s.lower().startswith(raw_lower)]
+            if len(exact) == 1:
+                logger.info("Fuzzy matched '%s' → '%s'", raw_name, exact[0])
+                return exact[0]
+
+        logger.info("Could not resolve location: '%s'", raw_name)
+        return None
+
+    def _get_all_stations(self):
+        if self._all_stations_cache is None:
+            self._all_stations_cache = self.prolog.get_all_station_names()
+        return self._all_stations_cache
 
     # ------------------------------------------------------------------
     # Route finding (Python Dijkstra, graph data pulled from Prolog)

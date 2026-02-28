@@ -5,18 +5,19 @@ find_route = {
     "description": (
         "Find the best route between two locations in Bangkok's public transit network. "
         "Use this when the user wants to travel from one place to another. "
-        "Locations can be station names or attraction names."
+        "Locations can be station names, partial names, or attraction names — "
+        "they will be resolved automatically."
     ),
     "parameters": {
         "type": "object",
         "properties": {
             "start": {
                 "type": "string",
-                "description": "The starting station or attraction name (e.g. 'Mo Chit (N8)' or 'Grand Palace')."
+                "description": "The starting location as the user said it (e.g. 'Siam', 'Grand Palace', 'Mo Chit')."
             },
             "end": {
                 "type": "string",
-                "description": "The destination station or attraction name (e.g. 'Siam (CEN)' or 'Terminal 21')."
+                "description": "The destination as the user said it (e.g. 'Asok', 'Terminal 21', 'Chatuchak')."
             }
         },
         "required": ["start", "end"]
@@ -34,7 +35,7 @@ line_of = {
         "properties": {
             "station_name": {
                 "type": "string",
-                "description": "The exact name of the station (e.g. 'Asok (E4)')."
+                "description": "The station name as the user said it (e.g. 'Asok', 'Mo Chit'). No need for exact codes."
             }
         },
         "required": ["station_name"]
@@ -52,11 +53,11 @@ same_line = {
         "properties": {
             "station_a": {
                 "type": "string",
-                "description": "The exact name of the first station."
+                "description": "The first station name as the user said it."
             },
             "station_b": {
                 "type": "string",
-                "description": "The exact name of the second station."
+                "description": "The second station name as the user said it."
             }
         },
         "required": ["station_a", "station_b"]
@@ -74,7 +75,7 @@ is_transfer_station = {
         "properties": {
             "station_name": {
                 "type": "string",
-                "description": "The exact name of the station to check (e.g. 'Siam (CEN)')."
+                "description": "The station name as the user said it (e.g. 'Siam', 'Bang Wa')."
             }
         },
         "required": ["station_name"]
@@ -92,11 +93,11 @@ needs_transfer = {
         "properties": {
             "station_a": {
                 "type": "string",
-                "description": "The exact name of the starting station."
+                "description": "The starting station name as the user said it."
             },
             "station_b": {
                 "type": "string",
-                "description": "The exact name of the destination station."
+                "description": "The destination station name as the user said it."
             }
         },
         "required": ["station_a", "station_b"]
@@ -114,7 +115,7 @@ attraction_near_station = {
         "properties": {
             "attraction_name": {
                 "type": "string",
-                "description": "The name of the attraction (e.g. 'Grand Palace', 'Chatuchak Weekend Market')."
+                "description": "The attraction name as the user said it (e.g. 'Grand Palace', 'Chatuchak Weekend Market')."
             }
         },
         "required": ["attraction_name"]

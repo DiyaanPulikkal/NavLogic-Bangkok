@@ -373,3 +373,16 @@ near_station('Wat Traimit', 'Hua Lamphong (BL28)').
 near_station('Silom Night Market', 'Sala Daeng (S2)').
 near_station('Bangkok Art and Culture Centre', 'National Stadium (W1)').
 near_station('Samyan Mitrtown', 'Sam Yan (BL27)').
+
+/*
+--------------------------------------------------
+Validation and Resolution Rules
+--------------------------------------------------
+*/
+
+% Check if a station exists in the network
+valid_station(S) :- station(S, _).
+
+% Resolve a location: attraction name → station, or direct station name
+resolve_location(Name, Station) :- near_station(Name, Station), !.
+resolve_location(Name, Name) :- valid_station(Name).
