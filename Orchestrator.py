@@ -221,7 +221,7 @@ class Orchestrator:
             return "No results found."
         if not result:
             return "No."
-        if result == [{}]:
+        if all(b == {} for b in result):
             return "Yes."
 
         lines = []

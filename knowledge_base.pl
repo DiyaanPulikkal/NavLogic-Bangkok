@@ -1,3 +1,6 @@
+:- discontiguous station/2.
+:- discontiguous connects/3.
+
 /*
 --------------------------------------------------
 BTS Sukhumvit Line

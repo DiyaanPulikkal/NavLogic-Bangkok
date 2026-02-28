@@ -53,3 +53,12 @@ def test_main_eof_exit(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert "Goodbye!" in output
 
+
+def test_main_eof_default(monkeypatch, capsys):
+    monkeypatch.setattr(main_module, "Orchestrator", StubOrchestrator)
+    monkeypatch.setattr(builtins, "input", make_input([]))
+
+    main_module.main()
+    output = capsys.readouterr().out
+    assert "Goodbye!" in output
+

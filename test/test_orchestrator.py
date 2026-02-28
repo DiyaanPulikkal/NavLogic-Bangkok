@@ -117,3 +117,45 @@ def test_format_prolog_result_variants():
     result = orchestrator._format_prolog_result([{"Line": "bts_sukhumvit"}])
     assert re.search(r"Line\s*=\s*bts_sukhumvit", result)
 
+    # Multiple empty bindings should also be "Yes."
+    assert orchestrator._format_prolog_result([{}, {}]) == "Yes."
+
+
+def test_handle_find_route_invalid_end():
+    orchestrator = make_orchestrator_with_llm_result(
+        ("find_route", {"start": "Siam", "end": "Narnia"})
+    )
+    assert orchestrator.handle("route") == "Unknown location: 'Narnia'."
+
+
+def test_handle_knowledge_query_unknown_station():
+    orchestrator = make_orchestrator_with_llm_result(
+        ("line_of", {"station_name": "Narnia"})
+    )
+    assert orchestrator.handle("line") == "Unknown location: 'Narnia'."
+
+
+def test_format_route_line_change_break():
+    orchestrator = OrchestratorNoLLM()
+    station_lines = {
+        "A": ["line1"],
+        "B": ["line1"],
+        "C": ["line1", "line2"],
+        "D": ["line2"],
+    }
+    path = ["A", "B", "C", "D"]
+    output = orchestrator._format_route(path, 10, station_lines)
+    assert "line1" in output
+    assert "line2" in output
+
+
+def test_orchestrator_real_init(monkeypatch):
+    from unittest.mock import MagicMock
+    import Orchestrator as orch_module
+    monkeypatch.setattr(orch_module, "LLMInterface", MagicMock)
+    orch = orch_module.Orchestrator()
+    assert orch.llm is not None
+    assert orch.prolog is not None
+    assert orch._station_lines_cache is None
+    assert orch._all_stations_cache is None
+
