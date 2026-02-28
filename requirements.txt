@@ -3,4 +3,5 @@ customtkinter
 python-dotenv
 openai
 pytest
+pytest-cov
 google-genai
