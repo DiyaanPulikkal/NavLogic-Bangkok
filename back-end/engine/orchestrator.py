@@ -69,7 +69,7 @@ class Orchestrator:
         logger.info("Prolog query: %s", prolog_query)
         prolog_result = self.prolog.query(prolog_query)
         logger.info("Prolog result: %s", prolog_result)
-        return {"type": "answer", "data": {"answer": self._format_prolog_result(prolog_result)}}
+        return self.llm.format_prolog_result(function_name, result={"type": "answer", "data": {"answer": self._format_prolog_result(prolog_result)}})
 
     def handle_text(self, user_input: str) -> str:
         """Legacy text-based interface for CLI usage."""

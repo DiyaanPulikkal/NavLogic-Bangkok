@@ -14,6 +14,7 @@ logger = logging.getLogger("llm")
 class LLMInterface:
     def __init__(self):
         self.client = genai.Client()
+        self.chat_history = []
         self.model = MODEL
         self.tools = types.Tool(function_declarations=FUNCTION_DECLARATIONS)
 
@@ -28,12 +29,18 @@ class LLMInterface:
     def translate_to_query(self, user_input):
         try:
             logger.info("Sending query to Gemini...")
+            self.chat_history.append(
+                types.Content(
+                    role="user", parts=[types.Part(text=user_input)]
+                )
+            )
             response = self.client.models.generate_content(
                 model=self.model,
                 config=self.config,
-                contents=user_input,
+                contents=self.chat_history,
             )
             if response.candidates:
+                self.chat_history.append(response.candidates[0].content)
                 first_candidate = response.candidates[0]
 
                 for part in first_candidate.content.parts:
@@ -49,3 +56,18 @@ class LLMInterface:
         except Exception as e:
             logger.error("Error during model generation: %s", e)
             return None
+
+    def format_prolog_result(self, function_name: str, result: dict):
+        function_response_part = types.Part.from_function_response(
+            name=function_name,
+            response={"result": result}
+        )
+        self.chat_history.append(types.Content(role="user", parts=[function_response_part]))
+
+        response = self.client.models.generate_content(
+            model=self.model,
+            config=self.config,
+            contents=self.chat_history,
+        )
+        result["data"]["answer"] = response.text
+        return result
