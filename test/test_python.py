@@ -3,7 +3,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import pytest
-from llm import LLMInterface
+from llms.llm import LLMInterface
 from main import main
 from Orchestrator import Orchestrator
 

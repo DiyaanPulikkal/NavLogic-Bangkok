@@ -4,3 +4,4 @@ Diagrams
 __pycache__
 *.pyc
 .pytest_cache
+.idea

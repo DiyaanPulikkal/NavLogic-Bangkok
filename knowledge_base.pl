@@ -1,3 +1,6 @@
+:- discontiguous station/2.
+:- discontiguous connects/3.
+
 /*
 --------------------------------------------------
 BTS Sukhumvit Line
@@ -269,7 +272,7 @@ Inter-line connections
 
 connects('Ha Yaek Lat Phrao (N9)', 'Phahon Yothin (BL14)', 10).
 connects('Mo Chit (N8)', 'Chatuchak Park (BL13)', 10).
-connects('Phaya Thai (N2)', 'Phaya Thai (A1)', 10).
+connects('Phaya Thai (N2)', 'Phaya Thai (A8)', 10).
 connects('Makkasan (A6)', 'Phetchaburi (BL21)', 10).
 connects('Asok (E4)', 'Sukhumvit (BL22)', 10).
 connects('Silom (BL26)', 'Sala Daeng (S2)', 10).
@@ -314,41 +317,75 @@ Connection Logic
 edge(A,B,T) :- connects(A,B,T).
 edge(A,B,T) :- connects(B,A,T).
 
+
 /*
 --------------------------------------------------
-Route Finding
+Reasoning Rules
 --------------------------------------------------
 */
 
-route(Start, Goal, AnnotatedPath, Time) :-
-    ucs([0-[Start]], Goal, RevPath, Time),
-    reverse(RevPath, Path),
-    annotate_path(Path, AnnotatedPath)
-.
+% What line(s) does a station serve?
+line_of(Station, Line) :-
+    station(Station, Line).
 
-ucs([Cost-[Goal|Rest] | _], Goal, [Goal|Rest], Cost) :- !.
+% True if two stations share at least one common line.
+same_line(StationA, StationB) :-
+    station(StationA, Line),
+    station(StationB, Line).
 
-% Expand lowest-cost path
-ucs([Cost-[Current|Rest] | Others], Goal, Path, FinalCost) :-
-    findall(
-        NewCost-[Next,Current|Rest],
-        (
-            edge(Current, Next, TravelTime),
-            \+ member(Next, [Current|Rest]),
-            NewCost is Cost + TravelTime
-        ),
-        NewPaths
-    ),
-    append(Others, NewPaths, TempQueue),
-    keysort(TempQueue, SortedQueue),
-    ucs(SortedQueue, Goal, Path, FinalCost)
-.
+% True if a station belongs to more than one line (interchange station).
+is_transfer_station(Station) :-
+    station(Station, Line1),
+    station(Station, Line2),
+    Line1 \= Line2.
 
-annotate_path([], []).
+% True if travelling between two stations requires a line change.
+needs_transfer(StationA, StationB) :-
+    \+ same_line(StationA, StationB).
 
-annotate_path([Station|Rest], [[Station,Line]|AnnotatedRest]) :-
-    station(Station, Line),
-    annotate_path(Rest, AnnotatedRest)
-.
+% Nearest station to a named attraction.
+attraction_near_station(Attraction, Station) :-
+    near_station(Attraction, Station),
+    attraction(Attraction).
 
-    
+/*
+--------------------------------------------------
+Attraction to Station Mappings
+--------------------------------------------------
+*/
+
+near_station('Siam Paragon', 'Siam (CEN)').
+near_station('Central World', 'Chit Lom (E1)').
+near_station('MBK Center', 'National Stadium (W1)').
+near_station('Lumpini Park', 'Lumphini (BL25)').
+near_station('Chatuchak Weekend Market', 'Mo Chit (N8)').
+near_station('Grand Palace', 'Sanam Chai (BL31)').
+near_station('Wat Pho', 'Sanam Chai (BL31)').
+near_station('Benchasiri Park', 'Phrom Phong (E5)').
+near_station('Victory Monument', 'Victory Monument (N3)').
+near_station('Bangkok Chinatown', 'Wat Mangkon (BL29)').
+near_station('Queen Sirikit National Convention Centre', 'Queen Sirikit National Convention Centre (BL23)').
+near_station('Asiatique The Riverfront', 'Saphan Taksin (S6)').
+near_station('Suvarnabhumi Airport', 'Suvarnabhumi Airport (A1)').
+near_station('Erawan Shrine', 'Chit Lom (E1)').
+near_station('Jim Thompson House', 'National Stadium (W1)').
+near_station('Terminal 21', 'Asok (E4)').
+near_station('Benjakitti Park', 'Queen Sirikit National Convention Centre (BL23)').
+near_station('Siam Center', 'Siam (CEN)').
+near_station('Wat Traimit', 'Hua Lamphong (BL28)').
+near_station('Silom Night Market', 'Sala Daeng (S2)').
+near_station('Bangkok Art and Culture Centre', 'National Stadium (W1)').
+near_station('Samyan Mitrtown', 'Sam Yan (BL27)').
+
+/*
+--------------------------------------------------
+Validation and Resolution Rules
+--------------------------------------------------
+*/
+
+% Check if a station exists in the network
+valid_station(S) :- station(S, _).
+
+% Resolve a location: attraction name → station, or direct station name
+resolve_location(Name, Station) :- near_station(Name, Station), !.
+resolve_location(Name, Name) :- valid_station(Name).
