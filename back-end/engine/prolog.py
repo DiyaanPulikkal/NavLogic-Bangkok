@@ -1,14 +1,17 @@
 import logging
+import os
 import re
 from pyswip import Prolog
 
 logger = logging.getLogger("prolog")
 
+KB_PATH = os.path.join(os.path.dirname(__file__), "knowledge_base.pl")
+
 
 class PrologInterface:
     def __init__(self):
         self.prolog = Prolog()
-        self.prolog.consult("knowledge_base.pl")
+        self.prolog.consult(KB_PATH)
 
     def is_valid_query(self, query):
         pattern = r'^[a-zA-Z_][a-zA-Z0-9_]*\((.*)\)\.$'

@@ -1,4 +1,4 @@
-from prolog import PrologInterface
+from engine.prolog import PrologInterface
 
 
 def test_is_valid_query():
@@ -44,4 +44,3 @@ def test_prolog_helpers():
 
     stations = interface.get_all_station_names()
     assert "Siam (CEN)" in stations
-

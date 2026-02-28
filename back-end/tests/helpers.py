@@ -1,5 +1,5 @@
-from Orchestrator import Orchestrator
-from prolog import PrologInterface
+from engine.orchestrator import Orchestrator
+from engine.prolog import PrologInterface
 
 
 class OrchestratorNoLLM(Orchestrator):
@@ -31,4 +31,3 @@ def build_graph_and_weights(edges):
         graph.setdefault(a, []).append((b, t))
         weights[(a, b)] = t
     return graph, weights
-

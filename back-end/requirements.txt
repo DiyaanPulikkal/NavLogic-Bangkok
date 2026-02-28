@@ -1,7 +1,8 @@
 pyswip
-customtkinter
 python-dotenv
-openai
+google-genai
+fastapi
+uvicorn
 pytest
 pytest-cov
-google-genai
+httpx

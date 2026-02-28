@@ -3,8 +3,8 @@ import os
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
-from config import MODEL
-from llms.tools import FUNCTION_DECLARATIONS
+from engine.config import MODEL
+from engine.llm.tools import FUNCTION_DECLARATIONS
 
 load_dotenv()
 
@@ -20,7 +20,8 @@ class LLMInterface:
             tools=[self.tools],
         )
 
-        with open("system_prompt.txt", "r") as f:
+        prompt_path = os.path.join(os.path.dirname(__file__), "system_prompt.txt")
+        with open(prompt_path, "r") as f:
             self.system_prompt = f.read()
 
     def translate_to_query(self, user_input):

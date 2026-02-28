@@ -1,8 +1,8 @@
 import heapq
 import logging
 
-from llms.llm import LLMInterface
-from prolog import PrologInterface
+from engine.llm.llm import LLMInterface
+from engine.prolog import PrologInterface
 
 logger = logging.getLogger("orchestrator")
 
@@ -40,74 +40,81 @@ class Orchestrator:
         self._station_lines_cache = None
         self._all_stations_cache = None
 
-    def handle(self, user_input: str) -> str:
+    def handle(self, user_input: str) -> dict:
         result = self.llm.translate_to_query(user_input)
         if not result:
-            return "Sorry, I couldn't process your request."
+            return {"type": "error", "data": {"message": "Sorry, I couldn't process your request."}}
 
         function_name, arguments = result
         logger.info("Dispatching: %s", function_name)
 
-        # Route finding → resolve names then Python Dijkstra
+        # Route finding
         if function_name == 'find_route':
-            start_raw = arguments['start']
-            end_raw = arguments['end']
+            return self._handle_find_route(arguments)
 
-            start = self._resolve_location(start_raw)
-            if start is None:
-                return f"Unknown location: '{start_raw}'."
-            end = self._resolve_location(end_raw)
-            if end is None:
-                return f"Unknown location: '{end_raw}'."
-
-            logger.info("Running Dijkstra from '%s' to '%s'", start, end)
-            return self._find_and_format_route(start, end)
-
-        # Knowledge-base queries → resolve station names, then Prolog
+        # Knowledge-base queries
         if function_name in STATION_ARG_KEYS:
             for key in STATION_ARG_KEYS[function_name]:
                 raw = arguments[key]
                 resolved = self._resolve_location(raw)
                 if resolved is None:
-                    return f"Unknown location: '{raw}'."
+                    return {"type": "error", "data": {"message": f"Unknown location: '{raw}'."}}
                 arguments[key] = resolved
 
         query_builder = PROLOG_QUERY_MAP.get(function_name)
         if query_builder is None:
-            return f"Unknown function: {function_name}"
+            return {"type": "error", "data": {"message": f"Unknown function: {function_name}"}}
 
         prolog_query = query_builder(arguments)
         logger.info("Prolog query: %s", prolog_query)
         prolog_result = self.prolog.query(prolog_query)
         logger.info("Prolog result: %s", prolog_result)
-        return self._format_prolog_result(prolog_result)
+        return {"type": "answer", "data": {"answer": self._format_prolog_result(prolog_result)}}
+
+    def handle_text(self, user_input: str) -> str:
+        """Legacy text-based interface for CLI usage."""
+        result = self.handle(user_input)
+        if result["type"] == "error":
+            return result["data"]["message"]
+        if result["type"] == "route":
+            return self._format_route_text(result["data"])
+        return result["data"].get("answer", str(result["data"]))
+
+    # ------------------------------------------------------------------
+    # Route handling
+    # ------------------------------------------------------------------
+
+    def _handle_find_route(self, arguments: dict) -> dict:
+        start_raw = arguments['start']
+        end_raw = arguments['end']
+
+        start = self._resolve_location(start_raw)
+        if start is None:
+            return {"type": "error", "data": {"message": f"Unknown location: '{start_raw}'."}}
+        end = self._resolve_location(end_raw)
+        if end is None:
+            return {"type": "error", "data": {"message": f"Unknown location: '{end_raw}'."}}
+
+        logger.info("Running Dijkstra from '%s' to '%s'", start, end)
+        return self._find_and_format_route(start, end)
 
     # ------------------------------------------------------------------
     # Name resolution
     # ------------------------------------------------------------------
 
     def _resolve_location(self, raw_name: str) -> str | None:
-        """Resolve a raw user-provided name to an exact station name.
-
-        1. Try Prolog resolve_location (handles attractions and exact station names)
-        2. Fallback: case-insensitive substring match against all station names
-        """
-        # Try Prolog first (exact attraction or station match)
         resolved = self.prolog.resolve_location(raw_name)
         if resolved:
             return resolved
 
-        # Fallback: fuzzy substring match
         all_stations = self._get_all_stations()
         raw_lower = raw_name.lower()
 
-        # Try substring match (e.g. "Siam" matches "Siam (CEN)")
         matches = [s for s in all_stations if raw_lower in s.lower()]
         if len(matches) == 1:
             logger.info("Fuzzy matched '%s' → '%s'", raw_name, matches[0])
             return matches[0]
 
-        # If multiple matches, try matching just the name part before the code
         if len(matches) > 1:
             exact = [s for s in matches if s.lower().startswith(raw_lower)]
             if len(exact) == 1:
@@ -126,16 +133,26 @@ class Orchestrator:
     # Route finding (Python Dijkstra, graph data pulled from Prolog)
     # ------------------------------------------------------------------
 
-    def _find_and_format_route(self, start: str, end: str) -> str:
+    def _find_and_format_route(self, start: str, end: str) -> dict:
         edges = self.prolog.get_all_edges()
         graph = self._build_graph(edges)
         path, cost = self._dijkstra(graph, start, end)
 
         if path is None:
-            return f"No route found from '{start}' to '{end}'."
+            return {"type": "error", "data": {"message": f"No route found from '{start}' to '{end}'."}}
 
         station_lines = self._get_station_lines()
-        return self._format_route(path, cost, station_lines)
+        steps = self._build_route_steps(path, station_lines)
+
+        return {
+            "type": "route",
+            "data": {
+                "from": path[0],
+                "to": path[-1],
+                "total_time": cost,
+                "steps": steps,
+            }
+        }
 
     def _build_graph(self, edges):
         graph = {}
@@ -163,13 +180,8 @@ class Orchestrator:
             self._station_lines_cache = self.prolog.get_station_lines()
         return self._station_lines_cache
 
-    def _format_route(self, path: list, cost: int, station_lines: dict) -> str:
-        output = [
-            f"Route: {path[0]}  →  {path[-1]}",
-            f"Estimated travel time: ~{cost} minutes\n",
-        ]
-
-        step = 1
+    def _build_route_steps(self, path: list, station_lines: dict) -> list:
+        steps = []
         i = 0
         while i < len(path) - 1:
             a = path[i]
@@ -179,12 +191,14 @@ class Orchestrator:
             shared = a_lines & b_lines
 
             if not shared:
-                # No common line → inter-line transfer (walking connection)
-                output.append(f"  [Transfer] Walk from {a}  →  {b}")
+                steps.append({
+                    "type": "transfer",
+                    "from": a,
+                    "to": b,
+                })
                 i += 1
                 continue
 
-            # Ride this line as far as possible before the line changes
             seg_line = next(iter(shared))
             seg_start = a
 
@@ -200,13 +214,33 @@ class Orchestrator:
                     break
 
             seg_end = path[j]
+            stations_in_segment = path[i:j + 1]
             display = LINE_DISPLAY_NAMES.get(seg_line, seg_line)
-            output.append(f"  Step {step}: {display}")
-            output.append(f"    Board at : {seg_start}")
-            output.append(f"    Alight at: {seg_end}")
-            step += 1
+            steps.append({
+                "type": "ride",
+                "line": display,
+                "board": seg_start,
+                "alight": seg_end,
+                "stations": stations_in_segment,
+            })
             i = j
 
+        return steps
+
+    def _format_route_text(self, data: dict) -> str:
+        output = [
+            f"Route: {data['from']}  →  {data['to']}",
+            f"Estimated travel time: ~{data['total_time']} minutes\n",
+        ]
+        step_num = 1
+        for step in data['steps']:
+            if step['type'] == 'transfer':
+                output.append(f"  [Transfer] Walk from {step['from']}  →  {step['to']}")
+            else:
+                output.append(f"  Step {step_num}: {step['line']}")
+                output.append(f"    Board at : {step['board']}")
+                output.append(f"    Alight at: {step['alight']}")
+                step_num += 1
         return "\n".join(output)
 
     # ------------------------------------------------------------------
@@ -215,7 +249,6 @@ class Orchestrator:
 
     def _format_prolog_result(self, result) -> str:
         if isinstance(result, str):
-            # Error message returned by PrologInterface.query
             return result
         if result is None:
             return "No results found."
@@ -229,3 +262,24 @@ class Orchestrator:
             pairs = ",  ".join(f"{k} = {v}" for k, v in binding.items())
             lines.append(f"  {pairs}")
         return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # Direct query methods (bypass LLM, used by API)
+    # ------------------------------------------------------------------
+
+    def find_route(self, start: str, end: str) -> dict:
+        return self._handle_find_route({"start": start, "end": end})
+
+    def get_all_stations_with_lines(self) -> list[dict]:
+        station_lines = self._get_station_lines()
+        return [
+            {"name": name, "lines": lines}
+            for name, lines in sorted(station_lines.items())
+        ]
+
+    def get_all_attractions(self) -> list[dict]:
+        results = list(self.prolog.prolog.query("near_station(Attraction, Station)"))
+        return [
+            {"name": str(r["Attraction"]), "station": str(r["Station"])}
+            for r in results
+        ]

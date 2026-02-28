@@ -1,4 +1,4 @@
-from test.helpers import OrchestratorNoLLM, build_graph_and_weights
+from tests.helpers import OrchestratorNoLLM, build_graph_and_weights
 
 
 def test_exhaustive_find_route_all_pairs():
@@ -24,4 +24,3 @@ def test_exhaustive_find_route_all_pairs():
                 computed_cost += weights[(a, b)]
 
             assert computed_cost == cost
-

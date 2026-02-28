@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-import llms.llm as llm_module
+import engine.llm.llm as llm_module
 
 
 class FakeFunctionCall:
@@ -63,4 +63,3 @@ def test_translate_to_query_exception(monkeypatch):
 
     llm = llm_module.LLMInterface()
     assert llm.translate_to_query("line") is None
-
