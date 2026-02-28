@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 from config import MODEL
-from tools import FUNCTION_DECLARATIONS
+from llms.tools import FUNCTION_DECLARATIONS
 
 load_dotenv()
 
@@ -29,14 +29,13 @@ class LLMInterface:
             if response.candidates:
                 first_candidate = response.candidates[0]
 
-                for part in first_candidate.parts:
+                for part in first_candidate.content.parts:
                     if part.function_call:
-                        print("model want to call function")
-
                         function_name = part.function_call.name
-                        arguments = part.function_call.arguments
+                        arguments = dict(part.function_call.args)
+                        return (function_name, arguments)
 
-                        print(f"Function name: {function_name}")
-                        print(f"Arguments: {arguments}")
-            else:
-                print("No candidates returned by the model.")
+            return None
+        except Exception as e:
+            print(f"Error during model generation: {e}")
+            return None

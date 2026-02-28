@@ -1,5 +1,4 @@
 import heapq
-import re
 
 from llms.llm import LLMInterface
 from prolog import PrologInterface
@@ -13,7 +12,14 @@ LINE_DISPLAY_NAMES = {
     'airport_rail_link': 'Airport Rail Link',
 }
 
-FIND_ROUTE_PATTERN = re.compile(r"^find_route\('([^']+)',\s*'([^']+)'\)\.$")
+# Prolog query builders for each knowledge-base function
+PROLOG_QUERY_MAP = {
+    'line_of':               lambda args: f"line_of('{args['station_name']}', Line).",
+    'same_line':             lambda args: f"same_line('{args['station_a']}', '{args['station_b']}').",
+    'is_transfer_station':   lambda args: f"is_transfer_station('{args['station_name']}').",
+    'needs_transfer':        lambda args: f"needs_transfer('{args['station_a']}', '{args['station_b']}').",
+    'attraction_near_station': lambda args: f"attraction_near_station('{args['attraction_name']}', Station).",
+}
 
 
 class Orchestrator:
@@ -23,21 +29,24 @@ class Orchestrator:
         self._station_lines_cache = None
 
     def handle(self, user_input: str) -> str:
-        query = self.llm.translate_to_query(user_input)
-        if not query:
+        result = self.llm.translate_to_query(user_input)
+        if not result:
             return "Sorry, I couldn't process your request."
 
-        query = query.strip()
+        function_name, arguments = result
 
-        # Detect find_route sentinel → delegate to Python path-finding
-        match = FIND_ROUTE_PATTERN.match(query)
-        if match:
-            start, end = match.group(1), match.group(2)
-            return self._find_and_format_route(start, end)
+        # Route finding → Python Dijkstra
+        if function_name == 'find_route':
+            return self._find_and_format_route(arguments['start'], arguments['end'])
 
-        # Otherwise forward to Prolog reasoning engine
-        result = self.prolog.query(query)
-        return self._format_prolog_result(result)
+        # Knowledge-base queries → Prolog
+        query_builder = PROLOG_QUERY_MAP.get(function_name)
+        if query_builder is None:
+            return f"Unknown function: {function_name}"
+
+        prolog_query = query_builder(arguments)
+        prolog_result = self.prolog.query(prolog_query)
+        return self._format_prolog_result(prolog_result)
 
     # ------------------------------------------------------------------
     # Route finding (Python Dijkstra, graph data pulled from Prolog)
