@@ -16,14 +16,15 @@ class LLMInterface:
         self.client = genai.Client()
         self.model = MODEL
         self.tools = types.Tool(function_declarations=FUNCTION_DECLARATIONS)
-        self.config = types.GenerateContentConfig(
-            tools=[self.tools],
-        )
 
         prompt_path = os.path.join(os.path.dirname(__file__), "system_prompt.txt")
         with open(prompt_path, "r") as f:
             self.system_prompt = f.read()
 
+        self.config = types.GenerateContentConfig(
+            tools=[self.tools],
+            system_instruction=self.system_prompt
+        )
     def translate_to_query(self, user_input):
         try:
             logger.info("Sending query to Gemini...")

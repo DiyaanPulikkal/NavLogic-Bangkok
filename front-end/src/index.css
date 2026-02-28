@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bts-green: #5a9a2f;
+  --color-bts-gold: #8b6914;
+  --color-mrt-blue: #1a3c8f;
+  --color-mrt-purple: #6b2fa0;
+  --color-arl-red: #c4161c;
+  --color-brt-orange: #e87722;
+  --color-srt-darkred: #8b1a1a;
+}
+
+body {
+  @apply bg-gray-50 text-gray-900 antialiased;
+  margin: 0;
+  min-height: 100vh;
+}
