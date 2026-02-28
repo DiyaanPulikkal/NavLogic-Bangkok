@@ -1,1 +1,1 @@
-MODEL = "gemini-3-flash"
+MODEL = "gemini-3-flash-preview"

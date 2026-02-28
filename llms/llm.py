@@ -13,7 +13,7 @@ class LLMInterface:
         self.model = MODEL
         self.tools = types.Tool(function_declarations=FUNCTION_DECLARATIONS)
         self.config = types.GenerateContentConfig(
-            tools=self.tools,
+            tools=[self.tools],
         )
 
         with open("system_prompt.txt", "r") as f:
