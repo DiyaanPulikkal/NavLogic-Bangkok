@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import type { RouteStep } from "../types";
 import { getLineColor, getLineDisplayName } from "../utils/lineColors";
+import { useTheme } from "../context/ThemeContext";
 
 interface Props {
   steps: RouteStep[];
@@ -28,6 +29,7 @@ export default function RouteSteps({ steps }: Props) {
 }
 
 function RideStep({ step }: { step: RouteStep }) {
+  const { colors } = useTheme();
   const color = getLineColor(step.line ?? "");
   const stationCount = step.stations?.length ?? 0;
 
@@ -50,34 +52,33 @@ function RideStep({ step }: { step: RouteStep }) {
       </div>
 
       {/* Content */}
-      <div className="flex-1 bg-white rounded-xl shadow-sm border border-gray-100 p-4 my-1">
+      <div className={`flex-1 ${colors.cardBg} rounded-xl border ${colors.cardBorder} p-4 my-1`}>
         <div
           className="inline-block px-2 py-0.5 rounded-full text-xs font-semibold text-white mb-2"
           style={{ backgroundColor: color }}
         >
           {getLineDisplayName(step.line ?? "")}
         </div>
-        <div className="text-sm text-gray-700">
+        <div className={`text-sm ${colors.textSecondary}`}>
           <p>
-            Board at <span className="font-medium text-gray-900">{step.board}</span>
+            Board at <span className={`font-medium ${colors.text}`}>{step.board}</span>
           </p>
-          <p className="text-xs text-gray-400 my-1">
+          <p className={`text-xs ${colors.textMuted} my-1`}>
             {stationCount > 0 ? `${stationCount - 1} stops` : ""}
           </p>
           <p>
-            Alight at <span className="font-medium text-gray-900">{step.alight}</span>
+            Alight at <span className={`font-medium ${colors.text}`}>{step.alight}</span>
           </p>
         </div>
 
-        {/* Intermediate stations */}
         {step.stations && step.stations.length > 2 && (
           <details className="mt-2">
-            <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600 transition-colors">
+            <summary className={`text-xs ${colors.textMuted} cursor-pointer hover:${colors.textSecondary.replace("text-", "")} transition-colors`}>
               Show all stops
             </summary>
             <ul className="mt-1 space-y-0.5">
               {step.stations.map((s, j) => (
-                <li key={j} className="text-xs text-gray-500 flex items-center gap-1.5">
+                <li key={j} className={`text-xs ${colors.textSecondary} flex items-center gap-1.5`}>
                   <span
                     className="w-1.5 h-1.5 rounded-full flex-shrink-0"
                     style={{ backgroundColor: color }}
@@ -94,6 +95,7 @@ function RideStep({ step }: { step: RouteStep }) {
 }
 
 function TransferStep({ step }: { step: RouteStep }) {
+  const { colors } = useTheme();
   return (
     <div className="flex gap-4 items-center">
       <div className="flex flex-col items-center w-8">
@@ -105,8 +107,8 @@ function TransferStep({ step }: { step: RouteStep }) {
           <span className="text-[10px]">🚶</span>
         </motion.div>
       </div>
-      <div className="flex-1 bg-amber-50 rounded-xl border border-amber-200 px-4 py-3 my-1">
-        <p className="text-sm text-amber-800">
+      <div className={`flex-1 ${colors.transferBg} rounded-xl border ${colors.transferBorder} px-4 py-3 my-1`}>
+        <p className={`text-sm ${colors.transferText}`}>
           Walk from <span className="font-medium">{step.from}</span> to{" "}
           <span className="font-medium">{step.to}</span>
         </p>

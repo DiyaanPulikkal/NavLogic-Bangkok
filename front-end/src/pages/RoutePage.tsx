@@ -3,11 +3,13 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import RouteSteps from "../components/RouteSteps";
 import { fetchRoute } from "../api/client";
+import { useTheme } from "../context/ThemeContext";
 import type { ApiRouteResult, RouteData } from "../types";
 
 export default function RoutePage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
+  const { colors } = useTheme();
   const from = params.get("from") ?? "";
   const to = params.get("to") ?? "";
 
@@ -36,9 +38,9 @@ export default function RoutePage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className={`h-screen flex items-center justify-center ${colors.bg}`}>
         <motion.div
-          className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full"
+          className="w-10 h-10 border-4 border-gray-700 border-t-blue-500 rounded-full"
           animate={{ rotate: 360 }}
           transition={{ repeat: Infinity, duration: 0.8, ease: "linear" }}
         />
@@ -48,18 +50,18 @@ export default function RoutePage() {
 
   if (error) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-4">
+      <div className={`h-screen flex flex-col items-center justify-center gap-4 px-4 ${colors.bg}`}>
         <motion.div
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           className="text-center"
         >
-          <p className="text-red-500 text-lg font-medium">{error}</p>
+          <p className="text-red-400 text-lg font-medium">{error}</p>
           <button
             onClick={() => navigate("/")}
-            className="mt-4 px-6 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-sm transition-colors"
+            className={`mt-4 px-6 py-2 ${colors.bgSecondary} ${colors.textSecondary} rounded-xl text-sm transition-colors border-none cursor-pointer`}
           >
-            ← Back to search
+            ← Back
           </button>
         </motion.div>
       </div>
@@ -69,26 +71,26 @@ export default function RoutePage() {
   if (!route) return null;
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-16">
+    <div className={`h-screen ${colors.bg} overflow-y-auto pb-16`}>
       {/* Header */}
-      <div className="bg-white border-b border-gray-100 sticky top-0 z-40">
+      <div className={`${colors.headerBg} border-b ${colors.headerBorder} sticky top-0 z-40`}>
         <div className="max-w-lg mx-auto px-4 py-4 flex items-center gap-3">
           <button
             onClick={() => navigate("/")}
-            className="text-gray-400 hover:text-gray-700 transition-colors text-xl bg-transparent border-none cursor-pointer"
+            className={`${colors.textMuted} hover:${colors.text.replace("text-", "")} transition-colors text-xl bg-transparent border-none cursor-pointer`}
           >
             ←
           </button>
           <div className="flex-1 min-w-0">
             <motion.h1
-              className="text-lg font-bold text-gray-900 truncate"
+              className={`text-lg font-bold ${colors.text} truncate`}
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
             >
               {route.from} → {route.to}
             </motion.h1>
             <motion.p
-              className="text-sm text-gray-400"
+              className={`text-sm ${colors.textMuted}`}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.2 }}
