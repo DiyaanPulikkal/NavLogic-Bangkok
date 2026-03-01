@@ -11,11 +11,20 @@ class OrchestratorNoLLM(Orchestrator):
 
 
 class StubLLM:
+    """Stub that returns a pre-configured result from translate_to_query."""
+
     def __init__(self, result):
         self._result = result
 
-    def translate_to_query(self, user_input):
-        return self._result
+    def translate_to_query(self, user_input, history=None):
+        if history is None:
+            history = []
+        return self._result, history
+
+    def format_prolog_result(self, function_name, result, history=None):
+        if history is None:
+            history = []
+        return result, history
 
 
 def make_orchestrator_with_llm_result(result):

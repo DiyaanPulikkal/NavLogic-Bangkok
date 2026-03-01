@@ -5,21 +5,21 @@ from tests.helpers import OrchestratorNoLLM, make_orchestrator_with_llm_result
 
 def test_handle_no_llm_result():
     orchestrator = make_orchestrator_with_llm_result(None)
-    result = orchestrator.handle("hi")
+    result, history = orchestrator.handle("hi")
     assert result["type"] == "error"
     assert "couldn't process" in result["data"]["message"]
 
 
 def test_handle_unknown_function():
     orchestrator = make_orchestrator_with_llm_result(("mystery", {}))
-    result = orchestrator.handle("hi")
+    result, history = orchestrator.handle("hi")
     assert result["type"] == "error"
     assert "Unknown function" in result["data"]["message"]
 
 
 def test_handle_line_of():
     orchestrator = make_orchestrator_with_llm_result(("line_of", {"station_name": "Mo Chit"}))
-    result = orchestrator.handle("line")
+    result, history = orchestrator.handle("line")
     assert result["type"] == "answer"
     assert "bts_sukhumvit" in result["data"]["answer"]
 
@@ -28,7 +28,7 @@ def test_handle_same_line():
     orchestrator = make_orchestrator_with_llm_result(
         ("same_line", {"station_a": "On Nut", "station_b": "Bearing"})
     )
-    result = orchestrator.handle("same")
+    result, history = orchestrator.handle("same")
     assert result["type"] == "answer"
     assert result["data"]["answer"] == "Yes."
 
@@ -37,7 +37,7 @@ def test_handle_is_transfer_station():
     orchestrator = make_orchestrator_with_llm_result(
         ("is_transfer_station", {"station_name": "Siam"})
     )
-    result = orchestrator.handle("transfer")
+    result, history = orchestrator.handle("transfer")
     assert result["type"] == "answer"
     assert result["data"]["answer"] == "Yes."
 
@@ -46,7 +46,7 @@ def test_handle_needs_transfer():
     orchestrator = make_orchestrator_with_llm_result(
         ("needs_transfer", {"station_a": "Asok", "station_b": "Silom"})
     )
-    result = orchestrator.handle("transfer")
+    result, history = orchestrator.handle("transfer")
     assert result["type"] == "answer"
     assert result["data"]["answer"] == "Yes."
 
@@ -55,7 +55,7 @@ def test_handle_attraction_near_station():
     orchestrator = make_orchestrator_with_llm_result(
         ("attraction_near_station", {"attraction_name": "Grand Palace"})
     )
-    result = orchestrator.handle("attraction")
+    result, history = orchestrator.handle("attraction")
     assert result["type"] == "answer"
     assert "Sanam Chai (BL31)" in result["data"]["answer"]
 
@@ -64,7 +64,7 @@ def test_handle_find_route_invalid_location():
     orchestrator = make_orchestrator_with_llm_result(
         ("find_route", {"start": "Narnia", "end": "Siam"})
     )
-    result = orchestrator.handle("route")
+    result, history = orchestrator.handle("route")
     assert result["type"] == "error"
     assert result["data"]["message"] == "Unknown location: 'Narnia'."
 
@@ -73,12 +73,19 @@ def test_handle_find_route_valid():
     orchestrator = make_orchestrator_with_llm_result(
         ("find_route", {"start": "Siam", "end": "Asok"})
     )
-    result = orchestrator.handle("route")
+    result, history = orchestrator.handle("route")
     assert result["type"] == "route"
     assert result["data"]["from"] == "Siam (CEN)"
     assert result["data"]["to"] == "Asok (E4)"
     assert result["data"]["total_time"] > 0
     assert len(result["data"]["steps"]) > 0
+
+
+def test_handle_text_response():
+    orchestrator = make_orchestrator_with_llm_result("Hello! How can I help you?")
+    result, history = orchestrator.handle("hello")
+    assert result["type"] == "answer"
+    assert result["data"]["answer"] == "Hello! How can I help you?"
 
 
 def test_resolve_location_cases():
@@ -177,7 +184,7 @@ def test_handle_find_route_invalid_end():
     orchestrator = make_orchestrator_with_llm_result(
         ("find_route", {"start": "Siam", "end": "Narnia"})
     )
-    result = orchestrator.handle("route")
+    result, history = orchestrator.handle("route")
     assert result["type"] == "error"
     assert result["data"]["message"] == "Unknown location: 'Narnia'."
 
@@ -186,7 +193,7 @@ def test_handle_knowledge_query_unknown_station():
     orchestrator = make_orchestrator_with_llm_result(
         ("line_of", {"station_name": "Narnia"})
     )
-    result = orchestrator.handle("line")
+    result, history = orchestrator.handle("line")
     assert result["type"] == "error"
     assert result["data"]["message"] == "Unknown location: 'Narnia'."
 
@@ -259,3 +266,14 @@ def test_get_all_attractions():
     attractions = orchestrator.get_all_attractions()
     assert len(attractions) > 0
     assert all("name" in a and "station" in a for a in attractions)
+
+
+def test_handle_with_history():
+    """Verify that handle accepts and passes through history."""
+    orchestrator = make_orchestrator_with_llm_result(
+        ("find_route", {"start": "Siam", "end": "Asok"})
+    )
+    fake_history = [{"role": "user", "content": "previous message"}]
+    result, returned_history = orchestrator.handle("route", history=fake_history)
+    assert result["type"] == "route"
+    assert isinstance(returned_history, list)

@@ -8,5 +8,5 @@ pytest-cov
 httpx
 sqlalchemy
 python-jose[cryptography]
-passlib[bcrypt]
+bcrypt
 pydantic[email]

@@ -10,8 +10,9 @@ class FakeFunctionCall:
 
 
 class FakePart:
-    def __init__(self, function_call=None):
+    def __init__(self, function_call=None, text=None):
         self.function_call = function_call
+        self.text = text
 
 
 class FakeCandidate:
@@ -45,9 +46,23 @@ def test_translate_to_query_function_call(monkeypatch):
     setup_llm(monkeypatch, response=response)
 
     llm = llm_module.LLMInterface()
-    result = llm.translate_to_query("line")
+    result, history = llm.translate_to_query("line", [])
 
     assert result == ("line_of", {"station_name": "Siam"})
+    assert isinstance(history, list)
+
+
+def test_translate_to_query_text_response(monkeypatch):
+    response = SimpleNamespace(
+        candidates=[FakeCandidate([FakePart(text="Hello there!")])]
+    )
+    setup_llm(monkeypatch, response=response)
+
+    llm = llm_module.LLMInterface()
+    result, history = llm.translate_to_query("hello", [])
+
+    assert result == "Hello there!"
+    assert isinstance(history, list)
 
 
 def test_translate_to_query_no_function_call(monkeypatch):
@@ -55,11 +70,14 @@ def test_translate_to_query_no_function_call(monkeypatch):
     setup_llm(monkeypatch, response=response)
 
     llm = llm_module.LLMInterface()
-    assert llm.translate_to_query("line") is None
+    result, history = llm.translate_to_query("line", [])
+    assert result is None
 
 
 def test_translate_to_query_exception(monkeypatch):
     setup_llm(monkeypatch, error=RuntimeError("boom"))
 
     llm = llm_module.LLMInterface()
-    assert llm.translate_to_query("line") is None
+    result, history = llm.translate_to_query("line", [])
+    assert result is None
+    assert isinstance(history, list)

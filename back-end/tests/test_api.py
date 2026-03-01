@@ -1,9 +1,7 @@
 import pytest
-from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 
 import app as app_module
-from engine.orchestrator import Orchestrator
 
 
 @pytest.fixture
@@ -49,13 +47,42 @@ def test_get_attractions(client):
     assert all("name" in a and "station" in a for a in attractions)
 
 
-def test_post_query(client):
+def test_post_query(auth_client, auth_headers, db_session):
+    """POST /api/query requires auth and a valid conversation_id."""
     from tests.helpers import StubLLM
-    client.app.state.orchestrator.llm = StubLLM(
+    from db import crud
+    from auth.jwt import decode_token
+
+    # Get user from the auth_headers token
+    token = auth_headers["Authorization"].split(" ")[1]
+    payload = decode_token(token, expected_type="access")
+    user_id = payload["sub"]
+
+    # Create a conversation
+    conv = crud.create_conversation(db_session, user_id, "Test Chat")
+
+    # Stub the LLM on the test app's orchestrator
+    auth_client.app.state.orchestrator.llm = StubLLM(
         ("find_route", {"start": "Siam", "end": "Asok"})
     )
-    resp = client.post("/api/query", json={"message": "route from Siam to Asok"})
+
+    resp = auth_client.post(
+        "/api/query",
+        json={"message": "route from Siam to Asok", "conversation_id": conv.id},
+        headers=auth_headers,
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["type"] == "route"
     assert data["data"]["from"] == "Siam (CEN)"
+
+    # Verify messages were persisted
+    messages = crud.get_messages_for_conversation(db_session, conv.id)
+    assert len(messages) == 2
+    assert messages[0].role == "user"
+    assert messages[1].role == "model"
+
+
+def test_post_query_unauthenticated(client):
+    resp = client.post("/api/query", json={"message": "hello", "conversation_id": 1})
+    assert resp.status_code in (401, 403)
