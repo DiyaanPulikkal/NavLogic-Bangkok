@@ -1,6 +1,11 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { postQuery, type QueryResponse } from "../api/client";
+import {
+  postQuery,
+  createConversation,
+  getConversation,
+  type QueryResponse,
+} from "../api/client";
 import { useTheme } from "../context/ThemeContext";
 import RouteSteps from "../components/RouteSteps";
 import type { RouteData, RouteStep } from "../types";
@@ -18,7 +23,12 @@ const suggestions = [
   { icon: "🔄", text: "Asok to Siam" },
 ];
 
-export default function HomePage() {
+interface HomePageProps {
+  conversationId: number | null;
+  onConversationCreated: (id: number) => void;
+}
+
+export default function HomePage({ conversationId, onConversationCreated }: HomePageProps) {
   const { theme, colors } = useTheme();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -27,11 +37,34 @@ export default function HomePage() {
 
   const hasMessages = messages.length > 0 || loading;
 
+  // Load messages when conversationId changes
+  useEffect(() => {
+    if (!conversationId) {
+      setMessages([]);
+      return;
+    }
+    let cancelled = false;
+    getConversation(conversationId)
+      .then((conv) => {
+        if (cancelled) return;
+        setMessages(
+          conv.messages.map((m) => ({
+            role: m.role === "user" ? "user" : "assistant",
+            content: m.content,
+          }))
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setMessages([]);
+      });
+    return () => { cancelled = true; };
+  }, [conversationId]);
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
-  async function sendMessage(text: string) {
+  const sendMessage = useCallback(async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || loading) return;
 
@@ -40,7 +73,16 @@ export default function HomePage() {
     setLoading(true);
 
     try {
-      const res = await postQuery(trimmed);
+      let activeConvId = conversationId;
+
+      // Auto-create conversation on first message
+      if (!activeConvId) {
+        const conv = await createConversation(trimmed.slice(0, 60));
+        activeConvId = conv.id;
+        onConversationCreated(conv.id);
+      }
+
+      const res = await postQuery(trimmed, activeConvId);
       const assistantMsg: Message = {
         role: "assistant",
         content: formatResponse(res),
@@ -55,7 +97,7 @@ export default function HomePage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [conversationId, loading, onConversationCreated]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

@@ -40,17 +40,24 @@ class Orchestrator:
         self._station_lines_cache = None
         self._all_stations_cache = None
 
-    def handle(self, user_input: str) -> dict:
-        result = self.llm.translate_to_query(user_input)
-        if not result:
-            return {"type": "error", "data": {"message": "Sorry, I couldn't process your request."}}
+    def handle(self, user_input: str, history: list | None = None) -> tuple[dict, list]:
+        if history is None:
+            history = []
+
+        result, history = self.llm.translate_to_query(user_input, history)
+        if result is None:
+            return {"type": "error", "data": {"message": "Sorry, I couldn't process your request."}}, history
+
+        # If the LLM returned plain text instead of a function call
+        if isinstance(result, str):
+            return {"type": "answer", "data": {"answer": result}}, history
 
         function_name, arguments = result
         logger.info("Dispatching: %s", function_name)
 
         # Route finding
         if function_name == 'find_route':
-            return self._handle_find_route(arguments)
+            return self._handle_find_route(arguments), history
 
         # Knowledge-base queries
         if function_name in STATION_ARG_KEYS:
@@ -58,22 +65,27 @@ class Orchestrator:
                 raw = arguments[key]
                 resolved = self._resolve_location(raw)
                 if resolved is None:
-                    return {"type": "error", "data": {"message": f"Unknown location: '{raw}'."}}
+                    return {"type": "error", "data": {"message": f"Unknown location: '{raw}'."}}, history
                 arguments[key] = resolved
 
         query_builder = PROLOG_QUERY_MAP.get(function_name)
         if query_builder is None:
-            return {"type": "error", "data": {"message": f"Unknown function: {function_name}"}}
+            return {"type": "error", "data": {"message": f"Unknown function: {function_name}"}}, history
 
         prolog_query = query_builder(arguments)
         logger.info("Prolog query: %s", prolog_query)
         prolog_result = self.prolog.query(prolog_query)
         logger.info("Prolog result: %s", prolog_result)
-        return self.llm.format_prolog_result(function_name, result={"type": "answer", "data": {"answer": self._format_prolog_result(prolog_result)}})
+        formatted, history = self.llm.format_prolog_result(
+            function_name,
+            result={"type": "answer", "data": {"answer": self._format_prolog_result(prolog_result)}},
+            history=history,
+        )
+        return formatted, history
 
     def handle_text(self, user_input: str) -> str:
         """Legacy text-based interface for CLI usage."""
-        result = self.handle(user_input)
+        result, _ = self.handle(user_input)
         if result["type"] == "error":
             return result["data"]["message"]
         if result["type"] == "route":

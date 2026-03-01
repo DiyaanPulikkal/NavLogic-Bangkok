@@ -6,3 +6,7 @@ uvicorn
 pytest
 pytest-cov
 httpx
+sqlalchemy
+python-jose[cryptography]
+passlib[bcrypt]
+pydantic[email]

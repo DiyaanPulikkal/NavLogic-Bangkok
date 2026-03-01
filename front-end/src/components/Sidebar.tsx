@@ -1,16 +1,44 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useTheme } from "../context/ThemeContext";
+import { useAuth } from "../context/AuthContext";
+import {
+  listConversations,
+  deleteConversation,
+  type ConversationInfo,
+} from "../api/client";
+import { useState, useEffect, useCallback } from "react";
 
 interface Props {
   open: boolean;
   onToggle: () => void;
+  conversations: ConversationInfo[];
+  activeConversationId: number | null;
+  onSelectConversation: (id: number | null) => void;
+  onConversationsChange: () => void;
 }
 
-export default function Sidebar({ open, onToggle }: Props) {
+export default function Sidebar({
+  open,
+  onToggle,
+  conversations,
+  activeConversationId,
+  onSelectConversation,
+  onConversationsChange,
+}: Props) {
   const navigate = useNavigate();
   const location = useLocation();
   const { theme, colors, toggle } = useTheme();
+  const { logout, isAuthenticated } = useAuth();
+
+  async function handleDelete(id: number, e: React.MouseEvent) {
+    e.stopPropagation();
+    await deleteConversation(id);
+    if (activeConversationId === id) {
+      onSelectConversation(null);
+    }
+    onConversationsChange();
+  }
 
   return (
     <>
@@ -49,11 +77,8 @@ export default function Sidebar({ open, onToggle }: Props) {
                 }
                 label="New chat"
                 onClick={() => {
-                  if (location.pathname === "/") {
-                    window.location.reload();
-                  } else {
-                    navigate("/");
-                  }
+                  onSelectConversation(null);
+                  if (location.pathname !== "/") navigate("/");
                 }}
               />
               <SidebarButton
@@ -67,6 +92,41 @@ export default function Sidebar({ open, onToggle }: Props) {
                 onClick={() => navigate("/explore")}
                 active={location.pathname === "/explore"}
               />
+
+              {/* Conversation list */}
+              {conversations.length > 0 && (
+                <div className="mt-4 pt-3 border-t border-current/10">
+                  <p className={`px-3 pb-2 text-xs font-medium ${colors.sidebarTextMuted} uppercase tracking-wide`}>
+                    History
+                  </p>
+                  {conversations.map((conv) => (
+                    <button
+                      key={conv.id}
+                      onClick={() => {
+                        onSelectConversation(conv.id);
+                        if (location.pathname !== "/") navigate("/");
+                      }}
+                      className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm transition-colors
+                                  bg-transparent border-none cursor-pointer text-left group
+                                  ${activeConversationId === conv.id
+                                    ? `${colors.sidebarActive} ${colors.text}`
+                                    : `${colors.sidebarText} ${colors.sidebarHover}`}`}
+                    >
+                      <span className="truncate flex-1">{conv.title}</span>
+                      <span
+                        onClick={(e) => handleDelete(conv.id, e)}
+                        className={`opacity-0 group-hover:opacity-100 ${colors.sidebarTextMuted} hover:text-red-400 transition-opacity cursor-pointer`}
+                        title="Delete"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <line x1="18" y1="6" x2="6" y2="18" />
+                          <line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </nav>
 
             {/* Theme toggle + footer */}
@@ -95,6 +155,20 @@ export default function Sidebar({ open, onToggle }: Props) {
                 )}
                 <span className="whitespace-nowrap">{theme === "dark" ? "Light mode" : "Dark mode"}</span>
               </button>
+              {isAuthenticated && (
+                <button
+                  onClick={logout}
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors
+                              bg-transparent border-none cursor-pointer text-left ${colors.sidebarText} ${colors.sidebarHover}`}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                    <polyline points="16 17 21 12 16 7" />
+                    <line x1="21" y1="12" x2="9" y2="12" />
+                  </svg>
+                  <span className="whitespace-nowrap">Sign out</span>
+                </button>
+              )}
               <p className={`text-xs px-3 ${colors.sidebarTextMuted}`}>Bangkok Public Transport</p>
             </div>
           </motion.aside>
