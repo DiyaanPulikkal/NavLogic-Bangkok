@@ -5,3 +5,6 @@ __pycache__
 *.pyc
 .pytest_cache
 .idea
+
+# SQlite database file
+*.db
