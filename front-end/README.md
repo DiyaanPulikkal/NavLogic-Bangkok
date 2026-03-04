@@ -25,9 +25,9 @@ export default defineConfig([
 
       // Remove tseslint.configs.recommended and replace with this
       tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
+      // Alternatively, use this for stricter rules.pl
       tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
+      // Optionally, add this for stylistic rules.pl
       tseslint.configs.stylisticTypeChecked,
 
       // Other configs...
@@ -56,9 +56,9 @@ export default defineConfig([
     files: ['**/*.{ts,tsx}'],
     extends: [
       // Other configs...
-      // Enable lint rules for React
+      // Enable lint rules.pl for React
       reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
+      // Enable lint rules.pl for React DOM
       reactDom.configs.recommended,
     ],
     languageOptions: {

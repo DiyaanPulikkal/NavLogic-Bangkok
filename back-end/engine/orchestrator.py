@@ -1,19 +1,12 @@
 import heapq
 import logging
+from difflib import SequenceMatcher
 
 from engine.llm.llm import LLMInterface
 from engine.prolog import PrologInterface
 
 logger = logging.getLogger("orchestrator")
 
-
-LINE_DISPLAY_NAMES = {
-    'bts_sukhumvit': 'BTS Sukhumvit Line',
-    'bts_silom':     'BTS Silom Line',
-    'gold':          'BTS Gold Line',
-    'mrt_blue':      'MRT Blue Line',
-    'airport_rail_link': 'Airport Rail Link',
-}
 
 # Prolog query builders for each knowledge-base function
 PROLOG_QUERY_MAP = {
@@ -37,8 +30,6 @@ class Orchestrator:
     def __init__(self):
         self.llm = LLMInterface()
         self.prolog = PrologInterface()
-        self._station_lines_cache = None
-        self._all_stations_cache = None
 
     def handle(self, user_input: str, history: list | None = None) -> tuple[dict, list]:
         if history is None:
@@ -115,31 +106,86 @@ class Orchestrator:
     # ------------------------------------------------------------------
 
     def _resolve_location(self, raw_name: str) -> str | None:
+        # 1. Exact match via Prolog resolve_location (attraction or station)
         resolved = self.prolog.resolve_location(raw_name)
         if resolved:
             return resolved
 
-        all_stations = self._get_all_stations()
-        raw_lower = raw_name.lower()
+        # 2. Classified fuzzy match — Prolog infers candidates and classifies
+        #    them as exact/prefix/substring; Python ranks and selects.
+        candidates = self.prolog.match_station_classified(raw_name)
+        if not candidates:
+            # 3. No Prolog match — try edit-distance against all stations
+            #    (handles typos like "Saim" → "Siam")
+            return self._best_edit_distance_match(raw_name)
 
-        matches = [s for s in all_stations if raw_lower in s.lower()]
-        if len(matches) == 1:
-            logger.info("Fuzzy matched '%s' → '%s'", raw_name, matches[0])
-            return matches[0]
-
-        if len(matches) > 1:
-            exact = [s for s in matches if s.lower().startswith(raw_lower)]
-            if len(exact) == 1:
-                logger.info("Fuzzy matched '%s' → '%s'", raw_name, exact[0])
-                return exact[0]
+        best = self._rank_candidates(raw_name, candidates)
+        if best:
+            logger.info("Resolved '%s' → '%s'", raw_name, best)
+            return best
 
         logger.info("Could not resolve location: '%s'", raw_name)
         return None
 
-    def _get_all_stations(self):
-        if self._all_stations_cache is None:
-            self._all_stations_cache = self.prolog.get_all_station_names()
-        return self._all_stations_cache
+    # ------------------------------------------------------------------
+    # Hybrid ranking: Prolog classifies, Python scores
+    # ------------------------------------------------------------------
+
+    # Priority order for match types (lower = better)
+    _MATCH_TYPE_RANK = {"exact": 0, "prefix": 1, "substring": 2}
+
+    def _rank_candidates(self, raw_name: str, candidates: list[dict]) -> str | None:
+        """Pick the best candidate using Prolog's match classification
+        and difflib similarity for tie-breaking."""
+        if not candidates:
+            return None
+
+        raw_lower = raw_name.lower()
+
+        def score(c):
+            type_rank = self._MATCH_TYPE_RANK.get(c["match_type"], 9)
+            similarity = SequenceMatcher(None, raw_lower, c["station"].lower()).ratio()
+            # Sort by: type rank ascending, then similarity descending
+            return (type_rank, -similarity)
+
+        candidates_sorted = sorted(candidates, key=score)
+        best = candidates_sorted[0]
+
+        # Only accept substring matches if similarity is high enough
+        if best["match_type"] == "substring":
+            sim = SequenceMatcher(None, raw_lower, best["station"].lower()).ratio()
+            if sim < 0.4:
+                return None
+
+        return best["station"]
+
+    @staticmethod
+    def _station_base_name(station: str) -> str:
+        """Extract the station name without the code suffix, e.g. 'Siam (CEN)' → 'Siam'."""
+        idx = station.find(" (")
+        return station[:idx] if idx != -1 else station
+
+    def _best_edit_distance_match(self, raw_name: str, threshold: float = 0.75) -> str | None:
+        """Fallback: find the closest station by edit distance (handles typos).
+        Compares against the base name (without station code) for better matching.
+        Uses a high threshold (0.75) to avoid false positives on unrelated words."""
+        all_stations = self.prolog.get_all_station_names()
+        raw_lower = raw_name.lower()
+        best_station = None
+        best_score = 0.0
+        for station in all_stations:
+            base = self._station_base_name(station).lower()
+            # Require similar length to avoid false positives on unrelated words
+            if abs(len(raw_lower) - len(base)) > 1:
+                continue
+            sim = SequenceMatcher(None, raw_lower, base).ratio()
+            if sim > best_score:
+                best_score = sim
+                best_station = station
+        if best_score >= threshold:
+            logger.info("Edit-distance matched '%s' → '%s' (score=%.2f)", raw_name, best_station, best_score)
+            return best_station
+        return None
 
     # ------------------------------------------------------------------
     # Route finding (Python Dijkstra, graph data pulled from Prolog)
@@ -153,8 +199,8 @@ class Orchestrator:
         if path is None:
             return {"type": "error", "data": {"message": f"No route found from '{start}' to '{end}'."}}
 
-        station_lines = self._get_station_lines()
-        steps = self._build_route_steps(path, station_lines)
+        # Delegate route step building to Prolog inference
+        steps = self.prolog.build_route_steps(path)
 
         return {
             "type": "route",
@@ -186,58 +232,6 @@ class Orchestrator:
                 if neighbor not in visited:
                     heapq.heappush(heap, (cost + weight, neighbor, path + [neighbor]))
         return None, None
-
-    def _get_station_lines(self):
-        if self._station_lines_cache is None:
-            self._station_lines_cache = self.prolog.get_station_lines()
-        return self._station_lines_cache
-
-    def _build_route_steps(self, path: list, station_lines: dict) -> list:
-        steps = []
-        i = 0
-        while i < len(path) - 1:
-            a = path[i]
-            b = path[i + 1]
-            a_lines = set(station_lines.get(a, []))
-            b_lines = set(station_lines.get(b, []))
-            shared = a_lines & b_lines
-
-            if not shared:
-                steps.append({
-                    "type": "transfer",
-                    "from": a,
-                    "to": b,
-                })
-                i += 1
-                continue
-
-            seg_line = next(iter(shared))
-            seg_start = a
-
-            j = i + 1
-            while j < len(path) - 1:
-                c = path[j]
-                d = path[j + 1]
-                c_lines = set(station_lines.get(c, []))
-                d_lines = set(station_lines.get(d, []))
-                if seg_line in (c_lines & d_lines):
-                    j += 1
-                else:
-                    break
-
-            seg_end = path[j]
-            stations_in_segment = path[i:j + 1]
-            display = LINE_DISPLAY_NAMES.get(seg_line, seg_line)
-            steps.append({
-                "type": "ride",
-                "line": display,
-                "board": seg_start,
-                "alight": seg_end,
-                "stations": stations_in_segment,
-            })
-            i = j
-
-        return steps
 
     def _format_route_text(self, data: dict) -> str:
         output = [
@@ -283,7 +277,7 @@ class Orchestrator:
         return self._handle_find_route({"start": start, "end": end})
 
     def get_all_stations_with_lines(self) -> list[dict]:
-        station_lines = self._get_station_lines()
+        station_lines = self.prolog.get_station_lines()
         return [
             {"name": name, "lines": lines}
             for name, lines in sorted(station_lines.items())

@@ -95,20 +95,23 @@ def test_resolve_location_cases():
     assert orchestrator._resolve_location("Siam (CEN)") == "Siam (CEN)"
     assert orchestrator._resolve_location("Asok") == "Asok (E4)"
     assert orchestrator._resolve_location("Chit") == "Chit Lom (E1)"
-    assert orchestrator._resolve_location("Bang") is None
     assert orchestrator._resolve_location("Narnia") is None
 
+    # Typo tolerance via edit-distance fallback
+    assert orchestrator._resolve_location("Saim") == "Siam (CEN)"
 
-def test_get_all_stations_and_lines_cache():
+
+def test_prolog_station_lines_and_fuzzy_match():
     orchestrator = OrchestratorNoLLM()
 
-    stations_first = orchestrator._get_all_stations()
-    stations_second = orchestrator._get_all_stations()
-    assert stations_first is stations_second
+    # Station lines are fetched from Prolog
+    station_lines = orchestrator.prolog.get_station_lines()
+    assert isinstance(station_lines, dict)
+    assert len(station_lines) > 0
 
-    lines_first = orchestrator._get_station_lines()
-    lines_second = orchestrator._get_station_lines()
-    assert lines_first is lines_second
+    # Fuzzy matching is now delegated to Prolog
+    matches = orchestrator.prolog.fuzzy_match_station("Siam")
+    assert any("Siam" in m for m in matches)
 
 
 def test_find_and_format_route_no_path():
@@ -120,10 +123,9 @@ def test_find_and_format_route_no_path():
 
 def test_build_route_steps_with_transfer():
     orchestrator = OrchestratorNoLLM()
-    station_lines = orchestrator.prolog.get_station_lines()
 
     path = ["Asok (E4)", "Sukhumvit (BL22)", "Silom (BL26)"]
-    steps = orchestrator._build_route_steps(path, station_lines)
+    steps = orchestrator.prolog.build_route_steps(path)
     assert any(s["type"] == "transfer" for s in steps)
     assert any(s["type"] == "ride" for s in steps)
 
@@ -200,14 +202,13 @@ def test_handle_knowledge_query_unknown_station():
 
 def test_build_route_steps_line_change():
     orchestrator = OrchestratorNoLLM()
-    station_lines = {
-        "A": ["line1"],
-        "B": ["line1"],
-        "C": ["line1", "line2"],
-        "D": ["line2"],
-    }
-    path = ["A", "B", "C", "D"]
-    steps = orchestrator._build_route_steps(path, station_lines)
+
+    # Use real stations: BTS Sukhumvit → transfer → MRT Blue
+    path = [
+        "Siam (CEN)", "Chit Lom (E1)", "Phloen Chit (E2)", "Nana (E3)", "Asok (E4)",
+        "Sukhumvit (BL22)", "Silom (BL26)",
+    ]
+    steps = orchestrator.prolog.build_route_steps(path)
     lines_used = [s["line"] for s in steps if s["type"] == "ride"]
     assert len(lines_used) == 2
 
@@ -219,8 +220,6 @@ def test_orchestrator_real_init(monkeypatch):
     orch = orch_module.Orchestrator()
     assert orch.llm is not None
     assert orch.prolog is not None
-    assert orch._station_lines_cache is None
-    assert orch._all_stations_cache is None
 
 
 def test_handle_text_legacy():
