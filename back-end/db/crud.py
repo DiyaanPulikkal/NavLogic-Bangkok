@@ -74,8 +74,8 @@ def touch_conversation(db: Session, conversation_id: int):
 
 # ── Messages ──
 
-def add_message(db: Session, conversation_id: int, role: str, content: str) -> Message:
-    msg = Message(conversation_id=conversation_id, role=role, content=content)
+def add_message(db: Session, conversation_id: int, role: str, content: str, response_data: dict | None = None) -> Message:
+    msg = Message(conversation_id=conversation_id, role=role, content=content, response_data=response_data)
     db.add(msg)
     db.commit()
     db.refresh(msg)

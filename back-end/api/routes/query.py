@@ -41,15 +41,17 @@ async def query(
     crud.add_message(db, body.conversation_id, "user", body.message)
 
     answer_text = ""
+    response_data = None
     if result["type"] == "answer":
         answer_text = result["data"].get("answer", "")
     elif result["type"] == "error":
         answer_text = result["data"].get("message", "")
     elif result["type"] == "route":
         answer_text = f"Route from {result['data'].get('from', '')} to {result['data'].get('to', '')}"
+        response_data = result
 
     if answer_text:
-        crud.add_message(db, body.conversation_id, "model", answer_text)
+        crud.add_message(db, body.conversation_id, "model", answer_text, response_data=response_data)
 
     crud.touch_conversation(db, body.conversation_id)
 

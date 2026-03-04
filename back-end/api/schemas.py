@@ -49,6 +49,7 @@ class MessageOut(BaseModel):
     id: int
     role: str
     content: str
+    response_data: dict | None = None
     created_at: datetime
 
 

@@ -48,7 +48,7 @@ def get_conversation(
         "created_at": conv.created_at,
         "updated_at": conv.updated_at,
         "messages": [
-            MessageOut(id=m.id, role=m.role, content=m.content, created_at=m.created_at)
+            MessageOut(id=m.id, role=m.role, content=m.content, response_data=m.response_data, created_at=m.created_at)
             for m in messages
         ],
     }

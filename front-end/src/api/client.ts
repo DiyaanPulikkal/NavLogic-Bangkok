@@ -77,7 +77,7 @@ export async function createConversation(
 }
 
 export interface ConversationDetail extends ConversationInfo {
-  messages: { id: number; role: string; content: string; created_at: string }[];
+  messages: { id: number; role: string; content: string; response_data: QueryResponse | null; created_at: string }[];
 }
 
 export async function getConversation(id: number): Promise<ConversationDetail> {

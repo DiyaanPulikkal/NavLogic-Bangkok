@@ -49,8 +49,9 @@ export default function HomePage({ conversationId, onConversationCreated }: Home
         if (cancelled) return;
         setMessages(
           conv.messages.map((m) => ({
-            role: m.role === "user" ? "user" : "assistant",
+            role: m.role === "user" ? "user" as const : "assistant" as const,
             content: m.content,
+            response: m.response_data ?? undefined,
           }))
         );
       })
