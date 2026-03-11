@@ -117,7 +117,7 @@ export default function HomePage({ conversationId, onConversationCreated }: Home
             transition={{ duration: 0.4 }}
           >
             <h1 className={`text-3xl font-semibold ${colors.text} mb-1`}>
-              <span className="text-orange-400 mr-2">✳</span>
+              <span className="text-orange-400 mr-2"></span>
               Welcome to Bangkok Transit
             </h1>
           </motion.div>
