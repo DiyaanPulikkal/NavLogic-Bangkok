@@ -9,7 +9,8 @@ import {
 import { useTheme } from "../context/ThemeContext";
 import RouteSteps from "../components/RouteSteps";
 import ScheduleSteps from "../components/ScheduleSteps";
-import type { RouteData, RouteStep, ScheduleData } from "../types";
+import DayPlanSteps from "../components/DayPlanSteps";
+import type { RouteData, RouteStep, ScheduleData, DayPlanData } from "../types";
 
 interface Message {
   role: "user" | "assistant";
@@ -23,6 +24,7 @@ const suggestions = [
   { icon: "🗺", text: "What line is Mo Chit on?" },
   { icon: "🔄", text: "Asok to Siam" },
   { icon: "🕐", text: "I need to get from Mo Chit to Asok by 8am" },
+  { icon: "📋", text: "Plan my day: Mo Chit to Siam by 8am, then Asok by 10am — what to visit?" },
 ];
 
 interface HomePageProps {
@@ -204,6 +206,8 @@ export default function HomePage({ conversationId, onConversationCreated }: Home
                         <RouteResult data={msg.response.data as unknown as RouteData} />
                       ) : msg.role === "assistant" && msg.response?.type === "schedule" ? (
                         <ScheduleResult data={msg.response.data as unknown as ScheduleData} />
+                      ) : msg.role === "assistant" && msg.response?.type === "day_plan" ? (
+                        <DayPlanResult data={msg.response.data as unknown as DayPlanData} />
                       ) : (
                         <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
                       )}
@@ -303,6 +307,20 @@ function ScheduleResult({ data }: { data: ScheduleData }) {
   );
 }
 
+function DayPlanResult({ data }: { data: DayPlanData }) {
+  const { colors } = useTheme();
+  return (
+    <div>
+      {data.answer && (
+        <p className={`text-sm ${colors.text} mb-3 whitespace-pre-wrap`}>{data.answer}</p>
+      )}
+      {data.legs && data.legs.length > 0 && (
+        <DayPlanSteps legs={data.legs} origin={data.origin} />
+      )}
+    </div>
+  );
+}
+
 function formatResponse(res: QueryResponse): string {
   if (res.type === "error") {
     return (res.data as { message: string }).message;
@@ -311,6 +329,9 @@ function formatResponse(res: QueryResponse): string {
     return (res.data as { answer: string }).answer;
   }
   if (res.type === "schedule") {
+    return (res.data as { answer?: string }).answer ?? "";
+  }
+  if (res.type === "day_plan") {
     return (res.data as { answer?: string }).answer ?? "";
   }
   return "";

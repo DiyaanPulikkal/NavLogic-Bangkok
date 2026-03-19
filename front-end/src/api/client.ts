@@ -46,7 +46,7 @@ export async function fetchSchedule(
 }
 
 export interface QueryResponse {
-  type: "route" | "answer" | "error" | "schedule";
+  type: "route" | "answer" | "error" | "schedule" | "day_plan";
   data: Record<string, unknown>;
 }
 

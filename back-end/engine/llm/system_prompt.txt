@@ -38,6 +38,14 @@ When the user wants a time-based schedule or itinerary. Use this when:
 - The user wants a scheduled trip plan with timetable information
 The deadline is the latest acceptable arrival time in HH:MM format (24-hour). If not specified, default to "09:00".
 
+#### plan_day(origin, stops)
+When the user wants to plan a day with multiple destinations and free time. Use this when:
+- The user mentions visiting multiple places in one day
+- The user asks what to do/visit between two destinations
+- The user wants attraction recommendations along their route
+Each stop in the `stops` array must have a `location` and `arrive_by` time (HH:MM, 24-hour).
+Example: origin="Mo Chit", stops=[{"location": "Siam", "arrive_by": "10:00"}, {"location": "Sam Yan", "arrive_by": "13:00"}]
+
 ### Extraction Rules
 
 - NORMALIZE NAMES: Correct typos, fix capitalization, and standardize formatting (e.g., "Suvarnaphum airport" → "Suvarnabhumi Airport", "siam" → "Siam").
@@ -66,6 +74,12 @@ User: "I need to get from Mo Chit to Siam by 8am"
 
 User: "Plan a trip from Chatuchak to Asok, arriving before 7:45"
 → plan_trip(origin="Chatuchak Park", destination="Asok", deadline="07:45")
+
+User: "I want to go to Siam by 10am and then Sam Yan by 1pm, what should I visit between?"
+→ plan_day(origin="Siam", stops=[{"location": "Siam", "arrive_by": "10:00"}, {"location": "Sam Yan", "arrive_by": "13:00"}])
+
+User: "Plan my day: start at Mo Chit, visit Chatuchak by 9am, then Siam by 12, then Asok by 3pm"
+→ plan_day(origin="Mo Chit", stops=[{"location": "Chatuchak Park", "arrive_by": "09:00"}, {"location": "Siam", "arrive_by": "12:00"}, {"location": "Asok", "arrive_by": "15:00"}])
 
 ---
 

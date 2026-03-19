@@ -153,6 +153,47 @@ plan_trip = {
     }
 }
 
+plan_day = {
+    "name": "plan_day",
+    "description": (
+        "Plan a day trip with multiple stops, time constraints, and attraction recommendations. "
+        "Use this when the user wants to visit multiple places in one day, has free time between stops, "
+        "or asks what to do/visit between two destinations. "
+        "This combines scheduled trip planning with nearby attraction lookup."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "origin": {
+                "type": "string",
+                "description": "The starting location (e.g. 'Mo Chit', 'Chatuchak Park')."
+            },
+            "stops": {
+                "type": "array",
+                "description": (
+                    "Ordered list of stops. Each stop has a location and an arrival deadline. "
+                    "Example: [{\"location\": \"Siam\", \"arrive_by\": \"10:00\"}, {\"location\": \"Sam Yan\", \"arrive_by\": \"13:00\"}]"
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "location": {
+                            "type": "string",
+                            "description": "The stop/destination name."
+                        },
+                        "arrive_by": {
+                            "type": "string",
+                            "description": "Latest arrival time in HH:MM 24-hour format."
+                        }
+                    },
+                    "required": ["location", "arrive_by"]
+                }
+            }
+        },
+        "required": ["origin", "stops"]
+    }
+}
+
 FUNCTION_DECLARATIONS = [
     find_route,
     line_of,
@@ -161,4 +202,5 @@ FUNCTION_DECLARATIONS = [
     needs_transfer,
     attraction_near_station,
     plan_trip,
+    plan_day,
 ]

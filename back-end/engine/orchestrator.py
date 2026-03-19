@@ -54,6 +54,10 @@ class Orchestrator:
         if function_name == 'plan_trip':
             return self._handle_plan_trip(arguments, history)
 
+        # Day planning with multiple stops + attractions
+        if function_name == 'plan_day':
+            return self._handle_plan_day(arguments, history)
+
         # Knowledge-base queries
         if function_name in STATION_ARG_KEYS:
             for key in STATION_ARG_KEYS[function_name]:
@@ -131,6 +135,73 @@ class Orchestrator:
 
         formatted, history = self.llm.format_prolog_result(
             "plan_trip",
+            result=result,
+            history=history,
+        )
+        return formatted, history
+
+    def _handle_plan_day(self, arguments: dict, history: list) -> tuple[dict, list]:
+        origin_raw = arguments.get('origin', '')
+        stops = arguments.get('stops', [])
+
+        if not stops:
+            return {"type": "error", "data": {"message": "Please provide at least one stop."}}, history
+
+        # Resolve origin
+        origin = self._resolve_location(origin_raw)
+        if origin is None:
+            return {"type": "error", "data": {"message": f"Unknown location: '{origin_raw}'."}}, history
+
+        # Resolve all stop locations
+        resolved_stops = []
+        for stop in stops:
+            loc_raw = stop['location']
+            resolved = self._resolve_location(loc_raw)
+            if resolved is None:
+                return {"type": "error", "data": {"message": f"Unknown location: '{loc_raw}'."}}, history
+            deadline = self._parse_time(stop['arrive_by'])
+            if deadline is None:
+                return {"type": "error", "data": {"message": f"Invalid time: '{stop['arrive_by']}'."}}, history
+            resolved_stops.append({
+                "location": resolved,
+                "arrive_by": stop['arrive_by'],
+                "deadline_int": deadline,
+            })
+
+        # Build day plan: for each leg, plan trip + find attractions at destination
+        legs = []
+        current_origin = origin
+        for stop in resolved_stops:
+            dest = stop['location']
+            deadline_int = stop['deadline_int']
+
+            # Plan the transit leg
+            itineraries = self.prolog.plan_trip(current_origin, dest, deadline_int)
+
+            # Find attractions near the destination station
+            attractions = self.prolog.attractions_near(dest)
+
+            legs.append({
+                "from": current_origin,
+                "to": dest,
+                "arrive_by": stop['arrive_by'],
+                "itineraries": itineraries,
+                "attractions": attractions,
+            })
+
+            current_origin = dest
+
+        result = {
+            "type": "day_plan",
+            "data": {
+                "origin": origin,
+                "stops": [s['location'] for s in resolved_stops],
+                "legs": legs,
+            }
+        }
+
+        formatted, history = self.llm.format_prolog_result(
+            "plan_day",
             result=result,
             history=history,
         )

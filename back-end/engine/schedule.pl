@@ -158,6 +158,13 @@ transit('Chatuchak Park (BL13)', 'Mo Chit (N8)', transfer_walk, 0710, 0720).
    -------------------------------------------------- */
 
 /*
+  Public entry point — initialises the visited-station list
+  to prevent infinite cycles (e.g. Asok ↔ Sukhumvit walk loop).
+*/
+plan_trip(Origin, Destination, Deadline, Itinerary) :-
+    plan_trip(Origin, Destination, Deadline, [Origin], Itinerary).
+
+/*
   Base case (direct trip):
   ∀ A,B,Line,Dep,Arr,Deadline:
     transit(A, B, Line, Dep, Arr) ∧ Arr ≤ Deadline
@@ -166,7 +173,7 @@ transit('Chatuchak Park (BL13)', 'Mo Chit (N8)', transfer_walk, 0710, 0720).
   The Prolog engine UNIFIES A, B, Line, Dep, Arr with
   matching transit/5 facts (Most General Unifier).
 */
-plan_trip(Origin, Destination, Deadline, [leg(Origin, Destination, Line, Depart, Arrive)]) :-
+plan_trip(Origin, Destination, Deadline, _Visited, [leg(Origin, Destination, Line, Depart, Arrive)]) :-
     transit(Origin, Destination, Line, Depart, Arrive),
     Arrive =< Deadline.
 
@@ -175,10 +182,11 @@ plan_trip(Origin, Destination, Deadline, [leg(Origin, Destination, Line, Depart,
   ∀ A,B,C,Line,Dep,Arr,Deadline,RestItinerary:
     transit(A, B, Line, Dep, Arr) ∧
     Arr =< Deadline ∧
-    plan_trip(B, C, Deadline, RestItinerary) ∧
+    B ∉ Visited ∧
+    plan_trip(B, C, Deadline, [B|Visited], RestItinerary) ∧
     first_departure(RestItinerary, NextDep) ∧
     Arr =< NextDep
-    → plan_trip(A, C, Deadline, [leg(A, B, Line, Dep, Arr) | RestItinerary])
+    → plan_trip(A, C, Deadline, Visited, [leg(A, B, Line, Dep, Arr) | RestItinerary])
 
   RESOLUTION: Prolog resolves the recursive plan_trip
   subgoal against both the base case and this rule,
@@ -187,13 +195,16 @@ plan_trip(Origin, Destination, Deadline, [leg(Origin, Destination, Line, Depart,
 
   CONNECTION CONSTRAINT: You cannot board the next leg
   before arriving at the intermediate station (Arr =< NextDep).
-  This prevents logically contradictory itineraries.
+
+  CYCLE PREVENTION: The Visited list ensures no station
+  is visited twice, eliminating infinite loops.
 */
-plan_trip(Origin, Destination, Deadline, [leg(Origin, Mid, Line, Depart, Arrive) | RestLegs]) :-
+plan_trip(Origin, Destination, Deadline, Visited, [leg(Origin, Mid, Line, Depart, Arrive) | RestLegs]) :-
     transit(Origin, Mid, Line, Depart, Arrive),
     Mid \= Destination,
+    \+ member(Mid, Visited),
     Arrive =< Deadline,
-    plan_trip(Mid, Destination, Deadline, RestLegs),
+    plan_trip(Mid, Destination, Deadline, [Mid | Visited], RestLegs),
     first_departure(RestLegs, NextDepart),
     Arrive =< NextDepart.
 

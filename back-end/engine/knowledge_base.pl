@@ -309,6 +309,37 @@ attraction('Silom Night Market').
 attraction('Bangkok Art and Culture Centre').
 attraction('Samyan Mitrtown').
 
+% --- Additional popular local attractions ---
+attraction('Siam Square').
+attraction('Gaysorn Village').
+attraction('EmQuartier').
+attraction('Emporium').
+attraction('Jodd Fairs Night Market').
+attraction('Ratchada Rot Fai Night Market').
+attraction('Huai Khwang Night Market').
+attraction('Talad Neon Night Market').
+attraction('Phrom Phong Japanese Town').
+attraction('Sukhumvit Soi 38 Street Food').
+attraction('Thong Lo Nightlife').
+attraction('Ekkamai Gateway').
+attraction('Siam Discovery').
+attraction('Platinum Fashion Mall').
+attraction('Pratunam Market').
+attraction('Pantip Plaza').
+attraction('Chulalongkorn University').
+attraction('Lumphini Boxing Stadium').
+attraction('Patpong Night Market').
+attraction('Mahanakhon SkyWalk').
+attraction('Wat Mangkon Kamalawat').
+attraction('IconSiam').
+attraction('SEA LIFE Bangkok Ocean World').
+attraction('Madame Tussauds Bangkok').
+attraction('KidZania Bangkok').
+attraction('Or Tor Kor Market').
+attraction('Ari Neighborhood Cafes').
+attraction('Saphan Khwai Local Market').
+attraction('Phra Khanong Local Eats').
+
 /*
 --------------------------------------------------
 Connection Logic
@@ -377,6 +408,37 @@ near_station('Wat Traimit', 'Hua Lamphong (BL28)').
 near_station('Silom Night Market', 'Sala Daeng (S2)').
 near_station('Bangkok Art and Culture Centre', 'National Stadium (W1)').
 near_station('Samyan Mitrtown', 'Sam Yan (BL27)').
+
+% --- Additional popular local attractions ---
+near_station('Siam Square', 'Siam (CEN)').
+near_station('Gaysorn Village', 'Chit Lom (E1)').
+near_station('EmQuartier', 'Phrom Phong (E5)').
+near_station('Emporium', 'Phrom Phong (E5)').
+near_station('Jodd Fairs Night Market', 'Phra Ram 9 (BL20)').
+near_station('Ratchada Rot Fai Night Market', 'Thailand Cultural Center (BL19)').
+near_station('Huai Khwang Night Market', 'Huai Khwang (BL18)').
+near_station('Talad Neon Night Market', 'Chit Lom (E1)').
+near_station('Phrom Phong Japanese Town', 'Phrom Phong (E5)').
+near_station('Sukhumvit Soi 38 Street Food', 'Thong Lo (E6)').
+near_station('Thong Lo Nightlife', 'Thong Lo (E6)').
+near_station('Ekkamai Gateway', 'Ekkamai (E7)').
+near_station('Siam Discovery', 'Siam (CEN)').
+near_station('Platinum Fashion Mall', 'Ratchathevi (N1)').
+near_station('Pratunam Market', 'Ratchathevi (N1)').
+near_station('Pantip Plaza', 'Ratchathevi (N1)').
+near_station('Chulalongkorn University', 'Sam Yan (BL27)').
+near_station('Lumphini Boxing Stadium', 'Lumphini (BL25)').
+near_station('Patpong Night Market', 'Sala Daeng (S2)').
+near_station('Mahanakhon SkyWalk', 'Chong Nonsi (S3)').
+near_station('Wat Mangkon Kamalawat', 'Wat Mangkon (BL29)').
+near_station('IconSiam', 'Krung Thon Buri (S7)').
+near_station('SEA LIFE Bangkok Ocean World', 'Siam (CEN)').
+near_station('Madame Tussauds Bangkok', 'Siam (CEN)').
+near_station('KidZania Bangkok', 'Siam (CEN)').
+near_station('Or Tor Kor Market', 'Mo Chit (N8)').
+near_station('Ari Neighborhood Cafes', 'Ari (N5)').
+near_station('Saphan Khwai Local Market', 'Saphan Khwai (N7)').
+near_station('Phra Khanong Local Eats', 'Phra Khanong (E8)').
 
 /*
 --------------------------------------------------

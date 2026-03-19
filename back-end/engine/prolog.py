@@ -242,6 +242,13 @@ class PrologInterface:
                 itineraries.append(legs)
         return itineraries
 
+    def attractions_near(self, station: str) -> list[str]:
+        """Return attraction names near a given station."""
+        query = f"attraction_near_station(Attraction, '{station}')"
+        logger.info("Executing Prolog query: %s", query)
+        results = list(self.prolog.query(query))
+        return list({str(r['Attraction']) for r in results})
+
     def _parse_formatted_legs(self, formatted_term) -> list[dict]:
         """Parse formatted_leg terms from Prolog into Python dicts."""
         legs = []

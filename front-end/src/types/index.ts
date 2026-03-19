@@ -56,5 +56,25 @@ export interface ScheduleResponse {
   data: ScheduleData;
 }
 
+export interface DayPlanLeg {
+  from: string;
+  to: string;
+  arrive_by: string;
+  itineraries: ScheduleLeg[][];
+  attractions: string[];
+}
+
+export interface DayPlanData {
+  origin: string;
+  stops: string[];
+  legs: DayPlanLeg[];
+  answer?: string;
+}
+
+export interface DayPlanResponse {
+  type: "day_plan";
+  data: DayPlanData;
+}
+
 export type ApiRouteResult = RouteResponse | ErrorResponse;
-export type ApiResult = RouteResponse | ScheduleResponse | ErrorResponse | { type: "answer"; data: { answer: string } };
+export type ApiResult = RouteResponse | ScheduleResponse | DayPlanResponse | ErrorResponse | { type: "answer"; data: { answer: string } };
