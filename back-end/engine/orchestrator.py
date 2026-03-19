@@ -58,6 +58,14 @@ class Orchestrator:
         if function_name == 'plan_day':
             return self._handle_plan_day(arguments, history)
 
+        # Day trip planning (auto-discover attractions)
+        if function_name == 'plan_day_trip':
+            return self._handle_plan_day_trip(arguments, history)
+
+        # Nightlife trip planning
+        if function_name == 'plan_nightlife':
+            return self._handle_plan_nightlife(arguments, history)
+
         # Knowledge-base queries
         if function_name in STATION_ARG_KEYS:
             for key in STATION_ARG_KEYS[function_name]:
@@ -206,6 +214,223 @@ class Orchestrator:
             history=history,
         )
         return formatted, history
+
+    def _handle_plan_day_trip(self, arguments: dict, history: list) -> tuple[dict, list]:
+        """Hybrid day-trip planner:
+        - Python Dijkstra for fast cross-line routing
+        - Prolog KB for attraction inference
+        Auto-discovers the best areas with attractions reachable by transit.
+        """
+        origin_raw = arguments['origin']
+        start_time_str = arguments.get('start_time', '09:00')
+        end_time_str = arguments.get('end_time', '17:00')
+
+        # Resolve origin
+        origin = self._resolve_location(origin_raw)
+        if origin is None:
+            return {"type": "error", "data": {"message": f"Unknown location: '{origin_raw}'."}}, history
+
+        start_time = self._parse_time(start_time_str)
+        if start_time is None:
+            return {"type": "error", "data": {"message": f"Invalid time format: '{start_time_str}'."}}, history
+        end_time = self._parse_time(end_time_str)
+        if end_time is None:
+            return {"type": "error", "data": {"message": f"Invalid time format: '{end_time_str}'."}}, history
+
+        # --- Prolog KB: get attractions grouped by station ---
+        attractions_by_station = self.prolog.get_attractions_by_station()
+        if not attractions_by_station:
+            return {"type": "answer", "data": {"answer": "No attractions found in the knowledge base."}}, history
+
+        # --- Python Dijkstra: find reachable attraction areas ---
+        edges = self.prolog.get_all_edges()
+        graph = self._build_graph(edges)
+
+        reachable = []
+        for station, attractions in attractions_by_station.items():
+            path, cost = self._dijkstra(graph, origin, station)
+            if path is not None:
+                reachable.append({"station": station, "cost": cost, "attractions": attractions, "path": path})
+
+        if not reachable:
+            return {"type": "answer", "data": {"answer": "No attraction areas reachable from your location via transit."}}, history
+
+        # Sort by travel time and select up to 4 diverse stops
+        reachable.sort(key=lambda x: x['cost'])
+        selected = self._select_day_trip_stops(reachable, max_stops=4)
+
+        # Calculate suggested arrival times spread across the day
+        start_min = (start_time // 100) * 60 + (start_time % 100)
+        end_min = (end_time // 100) * 60 + (end_time % 100)
+        total_min = end_min - start_min
+        slot_min = max(60, total_min // (len(selected) + 1))
+
+        # --- Build legs using Dijkstra route ---
+        legs = []
+        current_origin = origin
+        for i, stop in enumerate(selected):
+            arrive_min = start_min + (i + 1) * slot_min
+            arrive_h, arrive_m = divmod(arrive_min, 60)
+            arrive_str = f"{arrive_h:02d}:{arrive_m:02d}"
+
+            route_data = self._find_and_format_route(current_origin, stop['station'])
+
+            legs.append({
+                "from": current_origin,
+                "to": stop['station'],
+                "arrive_by": arrive_str,
+                "route": route_data.get("data") if route_data["type"] == "route" else None,
+                "itineraries": [],
+                "attractions": stop['attractions'],
+            })
+
+            current_origin = stop['station']
+
+        result = {
+            "type": "day_plan",
+            "data": {
+                "origin": origin,
+                "stops": [s['station'] for s in selected],
+                "legs": legs,
+            }
+        }
+
+        formatted, history = self.llm.format_prolog_result("plan_day_trip", result, history)
+        return formatted, history
+
+    @staticmethod
+    def _select_day_trip_stops(reachable: list[dict], max_stops: int = 4) -> list[dict]:
+        """Pick up to max_stops attraction areas, skipping stations too close together."""
+        if len(reachable) <= max_stops:
+            return reachable
+        selected = [reachable[0]]
+        for candidate in reachable[1:]:
+            if len(selected) >= max_stops:
+                break
+            too_close = any(abs(candidate['cost'] - s['cost']) < 5 for s in selected)
+            if not too_close:
+                selected.append(candidate)
+        if len(selected) < max_stops:
+            for candidate in reachable:
+                if len(selected) >= max_stops:
+                    break
+                if candidate not in selected:
+                    selected.append(candidate)
+        return selected
+
+    def _handle_plan_nightlife(self, arguments: dict, history: list) -> tuple[dict, list]:
+        """Hybrid nightlife planner:
+        - Python Dijkstra for fast cross-line routing
+        - Prolog KB for nightlife venue inference
+        - Prolog route_steps for step-by-step directions
+        """
+        origin_raw = arguments['origin']
+        start_time_str = arguments.get('start_time', '19:00')
+        end_time_str = arguments.get('end_time', '02:00')
+
+        # Resolve origin
+        origin = self._resolve_location(origin_raw)
+        if origin is None:
+            return {"type": "error", "data": {"message": f"Unknown location: '{origin_raw}'."}}, history
+
+        start_time = self._parse_time(start_time_str)
+        if start_time is None:
+            return {"type": "error", "data": {"message": f"Invalid time format: '{start_time_str}'."}}, history
+        end_time = self._parse_time(end_time_str)
+
+        # --- Prolog KB: get nightlife venues grouped by station ---
+        venues_by_station = self.prolog.get_nightlife_venues()
+        if not venues_by_station:
+            return {"type": "answer", "data": {"answer": "No nightlife venues found in the knowledge base."}}, history
+
+        # --- Python Dijkstra: find reachable nightlife areas ---
+        edges = self.prolog.get_all_edges()
+        graph = self._build_graph(edges)
+
+        reachable = []
+        for station, venues in venues_by_station.items():
+            path, cost = self._dijkstra(graph, origin, station)
+            if path is not None:
+                reachable.append({"station": station, "cost": cost, "venues": venues, "path": path})
+
+        if not reachable:
+            return {"type": "answer", "data": {"answer": "No nightlife areas reachable from your location via transit."}}, history
+
+        # Sort by travel time and select up to 3 diverse stops
+        reachable.sort(key=lambda x: x['cost'])
+        selected = self._select_nightlife_stops(reachable, max_stops=3)
+
+        # Calculate suggested arrival times spread across the evening
+        start_min = (start_time // 100) * 60 + (start_time % 100)
+        last_transit_min = 23 * 60 + 30  # 23:30
+        total_min = last_transit_min - start_min
+        slot_min = max(60, total_min // (len(selected) + 1))
+
+        # --- Build legs using Dijkstra route + Prolog route_steps ---
+        legs = []
+        current_origin = origin
+        for i, stop in enumerate(selected):
+            arrive_min = start_min + (i + 1) * slot_min
+            arrive_h, arrive_m = divmod(arrive_min, 60)
+            arrive_str = f"{arrive_h:02d}:{arrive_m:02d}"
+
+            # Dijkstra for this leg
+            route_data = self._find_and_format_route(current_origin, stop['station'])
+
+            venue_names = [v['name'] for v in stop['venues']]
+
+            legs.append({
+                "from": current_origin,
+                "to": stop['station'],
+                "arrive_by": arrive_str,
+                "route": route_data.get("data") if route_data["type"] == "route" else None,
+                "attractions": venue_names,
+            })
+
+            current_origin = stop['station']
+
+        # Determine if end time is past midnight
+        past_midnight = end_time is not None and end_time < start_time
+
+        result = {
+            "type": "nightlife",
+            "data": {
+                "origin": origin,
+                "stops": [s['station'] for s in selected],
+                "legs": legs,
+                "start_time": start_time_str,
+                "end_time": end_time_str,
+                "last_train_note": (
+                    "Bangkok's rail transit operates until approximately midnight. "
+                    "For your return trip after midnight, use Grab or a taxi."
+                ) if past_midnight or (end_time is not None and end_time > 2330) else None,
+            }
+        }
+
+        formatted, history = self.llm.format_prolog_result("plan_nightlife", result, history)
+        return formatted, history
+
+    @staticmethod
+    def _select_nightlife_stops(reachable: list[dict], max_stops: int = 3) -> list[dict]:
+        """Pick up to max_stops nightlife areas, skipping stations too close together."""
+        if len(reachable) <= max_stops:
+            return reachable
+        selected = [reachable[0]]
+        for candidate in reachable[1:]:
+            if len(selected) >= max_stops:
+                break
+            # Skip stations within 5 min of an already-selected one
+            too_close = any(abs(candidate['cost'] - s['cost']) < 5 for s in selected)
+            if not too_close:
+                selected.append(candidate)
+        # If we didn't fill up due to proximity filter, add remaining
+        if len(selected) < max_stops:
+            for candidate in reachable:
+                if len(selected) >= max_stops:
+                    break
+                if candidate not in selected:
+                    selected.append(candidate)
+        return selected
 
     @staticmethod
     def _parse_time(time_str: str) -> int | None:

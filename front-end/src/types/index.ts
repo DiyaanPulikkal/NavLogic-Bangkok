@@ -61,6 +61,7 @@ export interface DayPlanLeg {
   to: string;
   arrive_by: string;
   itineraries: ScheduleLeg[][];
+  route?: RouteData | null;
   attractions: string[];
 }
 
@@ -76,5 +77,28 @@ export interface DayPlanResponse {
   data: DayPlanData;
 }
 
+export interface NightlifeLeg {
+  from: string;
+  to: string;
+  arrive_by: string;
+  route: RouteData | null;
+  attractions: string[];
+}
+
+export interface NightlifeData {
+  origin: string;
+  stops: string[];
+  legs: NightlifeLeg[];
+  start_time: string;
+  end_time: string;
+  last_train_note: string | null;
+  answer?: string;
+}
+
+export interface NightlifeResponse {
+  type: "nightlife";
+  data: NightlifeData;
+}
+
 export type ApiRouteResult = RouteResponse | ErrorResponse;
-export type ApiResult = RouteResponse | ScheduleResponse | DayPlanResponse | ErrorResponse | { type: "answer"; data: { answer: string } };
+export type ApiResult = RouteResponse | ScheduleResponse | DayPlanResponse | NightlifeResponse | ErrorResponse | { type: "answer"; data: { answer: string } };

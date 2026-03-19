@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+from itertools import islice
 from pyswip import Prolog
 
 logger = logging.getLogger("prolog")
@@ -229,7 +230,8 @@ class PrologInterface:
             f"format_itinerary(Itinerary, Formatted)"
         )
         logger.info("Executing schedule query: %s", query)
-        results = list(self.prolog.query(query))
+        # Limit raw results to avoid combinatorial explosion on large schedules
+        results = list(islice(self.prolog.query(query), 100))
         logger.info("Schedule query returned %d result(s)", len(results))
 
         itineraries = []
@@ -248,6 +250,42 @@ class PrologInterface:
         logger.info("Executing Prolog query: %s", query)
         results = list(self.prolog.query(query))
         return list({str(r['Attraction']) for r in results})
+
+    def get_attractions_by_station(self) -> dict[str, list[str]]:
+        """Return attractions grouped by nearest station.
+
+        Returns:
+            Dict mapping station name to list of attraction names.
+        """
+        query = "near_station(Attraction, Station)"
+        logger.info("Executing Prolog query: %s", query)
+        results = list(self.prolog.query(query))
+        by_station: dict[str, list[str]] = {}
+        for r in results:
+            station = str(r['Station'])
+            attraction = str(r['Attraction'])
+            by_station.setdefault(station, []).append(attraction)
+        logger.info("Found attractions at %d stations", len(by_station))
+        return by_station
+
+    def get_nightlife_venues(self) -> dict[str, list[dict]]:
+        """Return nightlife venues grouped by nearest station.
+
+        Returns:
+            Dict mapping station name to list of {"name": str, "category": str}.
+        """
+        query = "nightlife_near_station(Venue, Category, Station)"
+        logger.info("Executing Prolog query: %s", query)
+        results = list(self.prolog.query(query))
+        venues_by_station: dict[str, list[dict]] = {}
+        for r in results:
+            station = str(r['Station'])
+            venues_by_station.setdefault(station, []).append({
+                "name": str(r['Venue']),
+                "category": str(r['Category']),
+            })
+        logger.info("Found nightlife venues at %d stations", len(venues_by_station))
+        return venues_by_station
 
     def _parse_formatted_legs(self, formatted_term) -> list[dict]:
         """Parse formatted_leg terms from Prolog into Python dicts."""

@@ -1,5 +1,7 @@
 :- discontiguous station/2.
 :- discontiguous connects/3.
+:- discontiguous attraction/1.
+:- discontiguous near_station/2.
 :- consult('rules.pl').
 
 /*
@@ -439,6 +441,71 @@ near_station('Or Tor Kor Market', 'Mo Chit (N8)').
 near_station('Ari Neighborhood Cafes', 'Ari (N5)').
 near_station('Saphan Khwai Local Market', 'Saphan Khwai (N7)').
 near_station('Phra Khanong Local Eats', 'Phra Khanong (E8)').
+
+% --- Nightlife venues ---
+attraction('Octave Rooftop Bar').
+attraction('Sky Bar at Lebua').
+attraction('Sing Sing Theater').
+attraction('BEAM Club').
+attraction('Glow Club').
+attraction('Route 66 Club').
+attraction('DEMO Club').
+attraction('Havana Social').
+attraction('Iron Fairies').
+attraction('Sukhumvit Soi 11 Bars').
+attraction('Soi Cowboy').
+attraction('RCA (Royal City Avenue)').
+attraction('Silom Soi 4 Bars').
+
+near_station('Octave Rooftop Bar', 'Thong Lo (E6)').
+near_station('Sky Bar at Lebua', 'Saphan Taksin (S6)').
+near_station('Sing Sing Theater', 'Thong Lo (E6)').
+near_station('BEAM Club', 'Thong Lo (E6)').
+near_station('Glow Club', 'Asok (E4)').
+near_station('Route 66 Club', 'Phra Ram 9 (BL20)').
+near_station('DEMO Club', 'Thong Lo (E6)').
+near_station('Havana Social', 'Nana (E3)').
+near_station('Iron Fairies', 'Thong Lo (E6)').
+near_station('Sukhumvit Soi 11 Bars', 'Nana (E3)').
+near_station('Soi Cowboy', 'Asok (E4)').
+near_station('RCA (Royal City Avenue)', 'Phra Ram 9 (BL20)').
+near_station('Silom Soi 4 Bars', 'Sala Daeng (S2)').
+
+/*
+--------------------------------------------------
+Nightlife Venue Classification
+  nightlife_venue(Name, Category).
+  Categories: rooftop_bar, club, bar, speakeasy,
+              bar_street, entertainment_district, night_market
+--------------------------------------------------
+*/
+
+nightlife_venue('Octave Rooftop Bar', rooftop_bar).
+nightlife_venue('Sky Bar at Lebua', rooftop_bar).
+nightlife_venue('Mahanakhon SkyWalk', rooftop_bar).
+nightlife_venue('Sing Sing Theater', club).
+nightlife_venue('BEAM Club', club).
+nightlife_venue('Glow Club', club).
+nightlife_venue('Route 66 Club', club).
+nightlife_venue('DEMO Club', club).
+nightlife_venue('Havana Social', speakeasy).
+nightlife_venue('Iron Fairies', bar).
+nightlife_venue('Sukhumvit Soi 11 Bars', bar_street).
+nightlife_venue('Soi Cowboy', entertainment_district).
+nightlife_venue('RCA (Royal City Avenue)', entertainment_district).
+nightlife_venue('Silom Soi 4 Bars', bar_street).
+nightlife_venue('Thong Lo Nightlife', bar_street).
+nightlife_venue('Patpong Night Market', night_market).
+nightlife_venue('Silom Night Market', night_market).
+nightlife_venue('Jodd Fairs Night Market', night_market).
+nightlife_venue('Ratchada Rot Fai Night Market', night_market).
+nightlife_venue('Huai Khwang Night Market', night_market).
+nightlife_venue('Talad Neon Night Market', night_market).
+
+% Rule: find station for a nightlife venue
+nightlife_near_station(Venue, Category, Station) :-
+    nightlife_venue(Venue, Category),
+    near_station(Venue, Station).
 
 /*
 --------------------------------------------------

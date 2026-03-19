@@ -1,24 +1,47 @@
 import { motion } from "framer-motion";
-import { MapPin } from "lucide-react";
-import type { DayPlanLeg, ScheduleLeg, RouteStep } from "../types";
+import { MapPin, Moon, AlertTriangle } from "lucide-react";
+import type { RouteData, RouteStep } from "../types";
 import { getLineColor, getLineDisplayName } from "../utils/lineColors";
 import { useTheme } from "../context/ThemeContext";
 
-interface Props {
-  legs: DayPlanLeg[];
-  origin: string;
+interface NightlifeLeg {
+  from: string;
+  to: string;
+  arrive_by: string;
+  route: RouteData | null;
+  attractions: string[];
 }
 
-export default function DayPlanSteps({ legs, origin }: Props) {
+interface NightlifeData {
+  origin: string;
+  stops: string[];
+  legs: NightlifeLeg[];
+  start_time: string;
+  end_time: string;
+  last_train_note: string | null;
+  answer?: string;
+}
+
+interface Props {
+  data: NightlifeData;
+}
+
+export default function NightlifeSteps({ data }: Props) {
   const { colors } = useTheme();
 
   return (
     <div className="space-y-3">
-      <div className={`text-[11px] font-medium ${colors.textMuted} uppercase tracking-wider`}>
-        Day plan from {origin}
+      <div className="flex items-center gap-2">
+        <Moon size={14} className="text-[#e87722]" />
+        <span className={`text-[11px] font-medium ${colors.textMuted} uppercase tracking-wider`}>
+          Nightlife plan from {data.origin}
+        </span>
+        <span className={`text-[11px] ${colors.textMuted} ml-auto tabular-nums`}>
+          {data.start_time} — {data.end_time}
+        </span>
       </div>
 
-      {legs.map((leg, i) => (
+      {data.legs.map((leg, i) => (
         <motion.div
           key={i}
           initial={{ opacity: 0, y: 10 }}
@@ -39,7 +62,7 @@ export default function DayPlanSteps({ legs, origin }: Props) {
             </span>
           </div>
 
-          {/* Transit directions: prefer route (Dijkstra) over itineraries (schedule) */}
+          {/* Route directions */}
           {leg.route ? (
             <div className="mb-3">
               <div className={`text-[11px] font-medium ${colors.textMuted} mb-2 uppercase tracking-wider`}>
@@ -51,37 +74,28 @@ export default function DayPlanSteps({ legs, origin }: Props) {
                 ))}
               </div>
             </div>
-          ) : leg.itineraries && leg.itineraries.length > 0 ? (
-            <div className="mb-3">
-              <div className={`text-[11px] font-medium ${colors.textMuted} mb-2 uppercase tracking-wider`}>Transit</div>
-              <div className="flex flex-col gap-0">
-                {leg.itineraries[0].map((segment, j) => (
-                  <LegSegment key={j} segment={segment} index={j} />
-                ))}
-              </div>
-            </div>
           ) : (
             <div className={`text-xs ${colors.textMuted} mb-3 italic`}>
               No transit route found for this leg.
             </div>
           )}
 
-          {/* Attractions */}
+          {/* Nightlife venues */}
           {leg.attractions.length > 0 && (
             <div>
               <div className={`text-[11px] font-medium ${colors.textMuted} mb-2 uppercase tracking-wider`}>
-                Near {leg.to}
+                Venues near {leg.to}
               </div>
               <div className="flex flex-wrap gap-1.5">
-                {leg.attractions.map((attr) => (
+                {leg.attractions.map((venue) => (
                   <span
-                    key={attr}
+                    key={venue}
                     className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium
                                ${colors.cardBg} border ${colors.cardBorder} ${colors.textSecondary}
                                transition-colors hover:border-[#e87722]/30 hover:text-[#e87722]`}
                   >
                     <MapPin size={11} className="opacity-50 flex-shrink-0" />
-                    {attr}
+                    {venue}
                   </span>
                 ))}
               </div>
@@ -89,6 +103,21 @@ export default function DayPlanSteps({ legs, origin }: Props) {
           )}
         </motion.div>
       ))}
+
+      {/* Last train warning */}
+      {data.last_train_note && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: data.legs.length * 0.12 + 0.2 }}
+          className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/20"
+        >
+          <AlertTriangle size={14} className="text-amber-500 mt-0.5 flex-shrink-0" />
+          <p className="text-xs text-amber-600 dark:text-amber-400 leading-relaxed">
+            {data.last_train_note}
+          </p>
+        </motion.div>
+      )}
     </div>
   );
 }
@@ -144,43 +173,6 @@ function CompactRouteStep({ step }: { step: RouteStep }) {
         </div>
         <div className={`text-[11px] ${colors.textSecondary} mt-0.5`}>
           {step.board} → {step.alight}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function LegSegment({ segment, index }: { segment: ScheduleLeg; index: number }) {
-  const { colors } = useTheme();
-  const isTransfer = segment.line.toLowerCase().includes("transfer") || segment.line.toLowerCase().includes("walk");
-  const color = isTransfer ? "#f59e0b" : getLineColor(segment.line);
-
-  return (
-    <div className="flex gap-3 items-stretch">
-      <div className="flex flex-col items-center w-5">
-        <div
-          className="w-2.5 h-2.5 rounded-full border-2 border-white shadow-sm flex-shrink-0"
-          style={{ backgroundColor: color }}
-        />
-        <div
-          className="flex-1 w-0.5 min-h-5"
-          style={{ backgroundColor: color, opacity: 0.3 }}
-        />
-      </div>
-      <div className="flex-1 pb-2">
-        <div className="flex items-center gap-2">
-          <span
-            className="inline-block px-1.5 py-0.5 rounded-md text-[10px] font-semibold text-white"
-            style={{ backgroundColor: color }}
-          >
-            {isTransfer ? "Walk" : segment.line}
-          </span>
-          <span className={`text-[11px] ${colors.textMuted} tabular-nums`}>
-            {segment.depart} → {segment.arrive}
-          </span>
-        </div>
-        <div className={`text-[11px] ${colors.textSecondary} mt-0.5`}>
-          {segment.from} → {segment.to}
         </div>
       </div>
     </div>

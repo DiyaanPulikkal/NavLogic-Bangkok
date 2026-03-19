@@ -46,6 +46,25 @@ When the user wants to plan a day with multiple destinations and free time. Use 
 Each stop in the `stops` array must have a `location` and `arrive_by` time (HH:MM, 24-hour).
 Example: origin="Mo Chit", stops=[{"location": "Siam", "arrive_by": "10:00"}, {"location": "Sam Yan", "arrive_by": "13:00"}]
 
+#### plan_day_trip(origin, start_time, end_time)
+When the user wants to explore Bangkok during the day without specifying exact stops. Use this when:
+- The user asks to plan a day trip or day out with a start/end time but no specific destinations
+- The user wants to explore and see what's around, rather than visiting specific places
+- The user mentions a hotel/starting location and a general time window
+The system automatically discovers the best areas with attractions reachable by transit.
+- `start_time`: when the day starts (HH:MM, 24-hour). Default "09:00".
+- `end_time`: when the day ends (HH:MM, 24-hour). Default "17:00".
+Use `plan_day` instead when the user specifies exact stops and arrival times.
+
+#### plan_nightlife(origin, start_time, end_time)
+When the user wants to plan a nightlife trip or evening out. Use this when:
+- The user mentions nightlife, going out at night, bars, clubs, rooftop bars, night markets
+- The user asks about evening entertainment or late-night activities
+- The user mentions a hotel/starting location and wants to explore nightlife
+The system will automatically find the best nightlife areas reachable by transit.
+- `start_time`: when the night starts (HH:MM, 24-hour). Default "19:00".
+- `end_time`: when the night ends (HH:MM, 24-hour). Default "02:00". Can be past midnight.
+
 ### Extraction Rules
 
 - NORMALIZE NAMES: Correct typos, fix capitalization, and standardize formatting (e.g., "Suvarnaphum airport" → "Suvarnabhumi Airport", "siam" → "Siam").
@@ -80,6 +99,24 @@ User: "I want to go to Siam by 10am and then Sam Yan by 1pm, what should I visit
 
 User: "Plan my day: start at Mo Chit, visit Chatuchak by 9am, then Siam by 12, then Asok by 3pm"
 → plan_day(origin="Mo Chit", stops=[{"location": "Chatuchak Park", "arrive_by": "09:00"}, {"location": "Siam", "arrive_by": "12:00"}, {"location": "Asok", "arrive_by": "15:00"}])
+
+User: "Can you plan a day trip in Bangkok? My hotel is in Lat Krabang, and I'd like to go out from 9:00 AM to 5:00 PM."
+→ plan_day_trip(origin="Lat Krabang", start_time="09:00", end_time="17:00")
+
+User: "I have a free day in Bangkok, starting from Siam around 10am until 4pm. What should I see?"
+→ plan_day_trip(origin="Siam", start_time="10:00", end_time="16:00")
+
+User: "Plan a sightseeing trip from my hotel near Asok, 8:30am to 6pm"
+→ plan_day_trip(origin="Asok", start_time="08:30", end_time="18:00")
+
+User: "Plan a nightlife trip in Bangkok. My hotel is in Lat Krabang. Start around 7pm, end around 2am."
+→ plan_nightlife(origin="Lat Krabang", start_time="19:00", end_time="02:00")
+
+User: "I want to go out tonight, I'm staying near Siam. What are good bars and clubs?"
+→ plan_nightlife(origin="Siam", start_time="20:00", end_time="02:00")
+
+User: "Suggest a night out with rooftop bars and night markets starting from Asok at 6:30pm"
+→ plan_nightlife(origin="Asok", start_time="18:30", end_time="00:00")
 
 ---
 

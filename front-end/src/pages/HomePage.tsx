@@ -22,7 +22,8 @@ import { useTheme } from "../context/ThemeContext";
 import RouteSteps from "../components/RouteSteps";
 import ScheduleSteps from "../components/ScheduleSteps";
 import DayPlanSteps from "../components/DayPlanSteps";
-import type { RouteData, RouteStep, ScheduleData, DayPlanData } from "../types";
+import NightlifeSteps from "../components/NightlifeSteps";
+import type { RouteData, RouteStep, ScheduleData, DayPlanData, NightlifeData } from "../types";
 
 interface Message {
   role: "user" | "assistant";
@@ -240,6 +241,8 @@ export default function HomePage({ conversationId, onConversationCreated }: Home
                         <ScheduleResult data={msg.response.data as unknown as ScheduleData} />
                       ) : msg.role === "assistant" && msg.response?.type === "day_plan" ? (
                         <DayPlanResult data={msg.response.data as unknown as DayPlanData} />
+                      ) : msg.role === "assistant" && msg.response?.type === "nightlife" ? (
+                        <NightlifeResult data={msg.response.data as unknown as NightlifeData} />
                       ) : msg.role === "assistant" ? (
                         <div className="prose-chat text-sm leading-relaxed">
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
@@ -386,6 +389,20 @@ function DayPlanResult({ data }: { data: DayPlanData }) {
   );
 }
 
+function NightlifeResult({ data }: { data: NightlifeData }) {
+  const { colors } = useTheme();
+  return (
+    <div>
+      {data.answer && (
+        <div className={`prose-chat text-sm ${colors.text} mb-3 leading-relaxed`}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{data.answer}</ReactMarkdown>
+        </div>
+      )}
+      <NightlifeSteps data={data} />
+    </div>
+  );
+}
+
 function formatResponse(res: QueryResponse): string {
   if (res.type === "error") {
     return (res.data as { message: string }).message;
@@ -397,6 +414,9 @@ function formatResponse(res: QueryResponse): string {
     return (res.data as { answer?: string }).answer ?? "";
   }
   if (res.type === "day_plan") {
+    return (res.data as { answer?: string }).answer ?? "";
+  }
+  if (res.type === "nightlife") {
     return (res.data as { answer?: string }).answer ?? "";
   }
   return "";
