@@ -1,5 +1,7 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   TrainFront,
   Landmark,
@@ -7,6 +9,7 @@ import {
   ArrowLeftRight,
   Clock,
   ClipboardList,
+  Loader2,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -237,6 +240,10 @@ export default function HomePage({ conversationId, onConversationCreated }: Home
                         <ScheduleResult data={msg.response.data as unknown as ScheduleData} />
                       ) : msg.role === "assistant" && msg.response?.type === "day_plan" ? (
                         <DayPlanResult data={msg.response.data as unknown as DayPlanData} />
+                      ) : msg.role === "assistant" ? (
+                        <div className="prose-chat text-sm leading-relaxed">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                        </div>
                       ) : (
                         <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
                       )}
@@ -245,22 +252,7 @@ export default function HomePage({ conversationId, onConversationCreated }: Home
                 ))}
               </AnimatePresence>
 
-              {loading && (
-                <motion.div
-                  initial={{ opacity: 0, y: 4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.2 }}
-                  className="flex justify-start"
-                >
-                  <div className={`${colors.assistantBubble} border ${colors.assistantBubbleBorder} rounded-2xl px-5 py-4`}>
-                    <div className="flex gap-1.5 items-center h-4">
-                      <span className={`w-2 h-2 rounded-full dot-bounce-1 ${theme === "dark" ? "bg-gray-500" : "bg-gray-300"}`} />
-                      <span className={`w-2 h-2 rounded-full dot-bounce-2 ${theme === "dark" ? "bg-gray-500" : "bg-gray-300"}`} />
-                      <span className={`w-2 h-2 rounded-full dot-bounce-3 ${theme === "dark" ? "bg-gray-500" : "bg-gray-300"}`} />
-                    </div>
-                  </div>
-                </motion.div>
-              )}
+              {loading && <LoadingIndicator />}
 
               <div ref={bottomRef} />
             </div>
@@ -307,6 +299,41 @@ export default function HomePage({ conversationId, onConversationCreated }: Home
   );
 }
 
+const loadingPhrases = [
+  "Checking the map...",
+  "Finding the best route...",
+  "Consulting the timetable...",
+  "Navigating Bangkok traffic...",
+  "Calculating transfers...",
+  "Asking the station master...",
+  "Scanning transit lines...",
+  "Optimizing your journey...",
+  "Crunching the schedule...",
+  "Almost there...",
+];
+
+function LoadingIndicator() {
+  const { colors } = useTheme();
+  const phrase = useMemo(
+    () => loadingPhrases[Math.floor(Math.random() * loadingPhrases.length)],
+    []
+  );
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25 }}
+      className="flex justify-start"
+    >
+      <div className={`flex items-center gap-2.5 px-4 py-2.5 rounded-2xl ${colors.assistantBubble} border ${colors.assistantBubbleBorder}`}>
+        <Loader2 size={16} className={`animate-spin ${colors.textMuted}`} />
+        <span className={`text-sm ${colors.textMuted}`}>{phrase}</span>
+      </div>
+    </motion.div>
+  );
+}
+
 function RouteResult({ data }: { data: RouteData }) {
   const { colors } = useTheme();
   return (
@@ -327,7 +354,9 @@ function ScheduleResult({ data }: { data: ScheduleData }) {
   return (
     <div>
       {data.answer && (
-        <p className={`text-sm ${colors.text} mb-3 whitespace-pre-wrap leading-relaxed`}>{data.answer}</p>
+        <div className={`prose-chat text-sm ${colors.text} mb-3 leading-relaxed`}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{data.answer}</ReactMarkdown>
+        </div>
       )}
       {data.itineraries && data.itineraries.length > 0 && (
         <ScheduleSteps
@@ -346,7 +375,9 @@ function DayPlanResult({ data }: { data: DayPlanData }) {
   return (
     <div>
       {data.answer && (
-        <p className={`text-sm ${colors.text} mb-3 whitespace-pre-wrap leading-relaxed`}>{data.answer}</p>
+        <div className={`prose-chat text-sm ${colors.text} mb-3 leading-relaxed`}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{data.answer}</ReactMarkdown>
+        </div>
       )}
       {data.legs && data.legs.length > 0 && (
         <DayPlanSteps legs={data.legs} origin={data.origin} />
