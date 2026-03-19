@@ -12,3 +12,5 @@ __pycache__
 # Skills
 .agents
 skills-lock.json
+.claude
+*.excalidraw
