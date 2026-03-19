@@ -1,5 +1,6 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate, useLocation } from "react-router-dom";
+import { TrainFront } from "lucide-react";
 import { useTheme } from "../context/ThemeContext";
 import { useAuth } from "../context/AuthContext";
 import {
@@ -52,8 +53,8 @@ export default function Sidebar({
             className={`h-screen ${colors.sidebarBg} border-r ${colors.sidebarBorder} flex flex-col overflow-hidden flex-shrink-0`}
           >
             <div className="flex items-center justify-between px-4 pt-4 pb-2">
-              <span className={`font-semibold text-base whitespace-nowrap ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
-                Bangkok Transit
+              <span className={`font-semibold text-base whitespace-nowrap tracking-tight ${theme === "dark" ? "text-gray-100" : "text-gray-900"}`}>
+                <TrainFront size={18} className="text-[#e87722] mr-1.5 inline-block" />Bangkok Transit
               </span>
               <button
                 onClick={onToggle}

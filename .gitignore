@@ -8,3 +8,7 @@ __pycache__
 
 # SQlite database file
 *.db
+
+# Skills
+.agents
+skills-lock.json

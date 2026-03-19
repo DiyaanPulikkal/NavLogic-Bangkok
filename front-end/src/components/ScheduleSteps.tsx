@@ -15,9 +15,11 @@ export default function ScheduleSteps({ itineraries, origin, destination, deadli
 
   return (
     <div className="space-y-4">
-      <div className={`text-sm font-medium ${colors.text}`}>
-        {origin} → {destination}
-        <span className={`ml-2 text-xs ${colors.textMuted}`}>arrive by {deadline}</span>
+      <div className="flex items-baseline gap-2">
+        <span className={`text-sm font-semibold ${colors.text} tracking-tight`}>
+          {origin} → {destination}
+        </span>
+        <span className={`text-xs ${colors.textMuted}`}>by {deadline}</span>
       </div>
 
       {itineraries.map((legs, i) => (
@@ -28,7 +30,7 @@ export default function ScheduleSteps({ itineraries, origin, destination, deadli
           transition={{ delay: i * 0.1, duration: 0.3 }}
           className={`${colors.cardBg} rounded-xl border ${colors.cardBorder} p-4`}
         >
-          <div className={`text-xs font-semibold ${colors.textMuted} mb-3`}>
+          <div className={`text-[11px] font-medium ${colors.textMuted} mb-3 uppercase tracking-wider`}>
             Option {i + 1}
           </div>
 
@@ -78,7 +80,7 @@ function LegStep({ leg, index }: { leg: ScheduleLeg; index: number }) {
       <div className="flex-1 pb-3">
         <div className="flex items-center gap-2 mb-1">
           <span
-            className="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold text-white"
+            className="inline-block px-1.5 py-0.5 rounded-md text-[10px] font-semibold text-white"
             style={{ backgroundColor: color }}
           >
             {isTransfer ? "Walk" : leg.line}

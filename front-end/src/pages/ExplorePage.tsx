@@ -59,8 +59,8 @@ export default function ExplorePage() {
                 onClick={() => { setTab(t); setLineFilter(null); setSearch(""); }}
                 className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors border-none cursor-pointer ${
                   tab === t
-                    ? "bg-blue-600 text-white"
-                    : `${colors.bgSecondary} ${colors.textMuted}`
+                    ? "bg-[#e87722] text-white"
+                    : `${colors.bgSecondary} ${colors.textMuted} hover:${colors.textSecondary.replace("text-", "text-")}`
                 }`}
               >
                 {t === "stations" ? "Stations" : "Attractions"}
@@ -75,7 +75,7 @@ export default function ExplorePage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className={`w-full px-4 py-2 rounded-xl border ${colors.inputBorder} ${colors.inputBg} ${colors.text} text-sm
-                       placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                       placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#e87722]/40 focus:border-[#e87722]/50`}
           />
 
           {/* Line filter chips */}

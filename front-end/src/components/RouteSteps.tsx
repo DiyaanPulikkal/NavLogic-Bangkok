@@ -1,4 +1,5 @@
 import { motion } from "framer-motion";
+import { Footprints } from "lucide-react";
 import type { RouteStep } from "../types";
 import { getLineColor, getLineDisplayName } from "../utils/lineColors";
 import { useTheme } from "../context/ThemeContext";
@@ -52,19 +53,23 @@ function RideStep({ step }: { step: RouteStep }) {
       </div>
 
       {/* Content */}
-      <div className={`flex-1 ${colors.cardBg} rounded-xl border ${colors.cardBorder} p-4 my-1`}>
-        <div
-          className="inline-block px-2 py-0.5 rounded-full text-xs font-semibold text-white mb-2"
-          style={{ backgroundColor: color }}
-        >
-          {getLineDisplayName(step.line ?? "")}
+      <div className={`flex-1 ${colors.cardBg} rounded-xl border ${colors.cardBorder} p-4 my-1 transition-colors ${colors.cardHover}`}>
+        <div className="flex items-center gap-2 mb-2">
+          <span
+            className="inline-block px-2.5 py-0.5 rounded-md text-[11px] font-semibold text-white tracking-wide"
+            style={{ backgroundColor: color }}
+          >
+            {getLineDisplayName(step.line ?? "")}
+          </span>
+          {stationCount > 0 && (
+            <span className={`text-[11px] ${colors.textMuted}`}>
+              {stationCount - 1} stops
+            </span>
+          )}
         </div>
-        <div className={`text-sm ${colors.textSecondary}`}>
+        <div className={`text-sm ${colors.textSecondary} space-y-0.5`}>
           <p>
             Board at <span className={`font-medium ${colors.text}`}>{step.board}</span>
-          </p>
-          <p className={`text-xs ${colors.textMuted} my-1`}>
-            {stationCount > 0 ? `${stationCount - 1} stops` : ""}
           </p>
           <p>
             Alight at <span className={`font-medium ${colors.text}`}>{step.alight}</span>
@@ -104,7 +109,7 @@ function TransferStep({ step }: { step: RouteStep }) {
           animate={{ scale: [1, 1.2, 1] }}
           transition={{ repeat: Infinity, duration: 2 }}
         >
-          <span className="text-[10px]">🚶</span>
+          <Footprints size={12} className="text-amber-900" />
         </motion.div>
       </div>
       <div className={`flex-1 ${colors.transferBg} rounded-xl border ${colors.transferBorder} px-4 py-3 my-1`}>
