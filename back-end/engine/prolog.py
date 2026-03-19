@@ -6,12 +6,14 @@ from pyswip import Prolog
 logger = logging.getLogger("prolog")
 
 KB_PATH = os.path.join(os.path.dirname(__file__), "knowledge_base.pl")
+SCHEDULE_PATH = os.path.join(os.path.dirname(__file__), "schedule.pl")
 
 
 class PrologInterface:
     def __init__(self):
         self.prolog = Prolog()
         self.prolog.consult(KB_PATH)
+        self.prolog.consult(SCHEDULE_PATH)
 
     def is_valid_query(self, query):
         pattern = r'^[a-zA-Z_][a-zA-Z0-9_]*\((.*)\)\.$'
@@ -206,3 +208,53 @@ class PrologInterface:
         if results:
             return str(results[0]['Name'])
         return line_id
+
+    # ------------------------------------------------------------------
+    # Schedule & Trip Planning (FOL / Resolution)
+    # ------------------------------------------------------------------
+
+    def plan_trip(self, origin: str, destination: str, deadline: int) -> list[dict]:
+        """Query plan_trip/4 and return formatted itineraries.
+
+        Args:
+            origin: Station name (e.g. "Mo Chit (N8)")
+            destination: Station name (e.g. "Siam (CEN)")
+            deadline: Latest arrival time as HHMM integer (e.g. 0800)
+
+        Returns:
+            List of itineraries, each a list of leg dicts.
+        """
+        query = (
+            f"plan_trip('{origin}', '{destination}', {deadline}, Itinerary), "
+            f"format_itinerary(Itinerary, Formatted)"
+        )
+        logger.info("Executing schedule query: %s", query)
+        results = list(self.prolog.query(query))
+        logger.info("Schedule query returned %d result(s)", len(results))
+
+        itineraries = []
+        seen = set()
+        for r in results:
+            legs = self._parse_formatted_legs(r['Formatted'])
+            key = tuple((l['from'], l['to'], l['depart'], l['arrive']) for l in legs)
+            if key not in seen:
+                seen.add(key)
+                itineraries.append(legs)
+        return itineraries
+
+    def _parse_formatted_legs(self, formatted_term) -> list[dict]:
+        """Parse formatted_leg terms from Prolog into Python dicts."""
+        legs = []
+        for item in formatted_term:
+            s = str(item)
+            if s.startswith('formatted_leg('):
+                inner = s[len('formatted_leg('):-1]
+                parts = self._split_top_level(inner)
+                legs.append({
+                    "from": parts[0].strip().strip("'"),
+                    "to": parts[1].strip().strip("'"),
+                    "line": parts[2].strip().strip("'"),
+                    "depart": parts[3].strip().strip("'"),
+                    "arrive": parts[4].strip().strip("'"),
+                })
+        return legs

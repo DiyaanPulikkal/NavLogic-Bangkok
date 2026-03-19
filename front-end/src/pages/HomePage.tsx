@@ -8,7 +8,8 @@ import {
 } from "../api/client";
 import { useTheme } from "../context/ThemeContext";
 import RouteSteps from "../components/RouteSteps";
-import type { RouteData, RouteStep } from "../types";
+import ScheduleSteps from "../components/ScheduleSteps";
+import type { RouteData, RouteStep, ScheduleData } from "../types";
 
 interface Message {
   role: "user" | "assistant";
@@ -21,6 +22,7 @@ const suggestions = [
   { icon: "🏛", text: "What's near Grand Palace?" },
   { icon: "🗺", text: "What line is Mo Chit on?" },
   { icon: "🔄", text: "Asok to Siam" },
+  { icon: "🕐", text: "I need to get from Mo Chit to Asok by 8am" },
 ];
 
 interface HomePageProps {
@@ -200,6 +202,8 @@ export default function HomePage({ conversationId, onConversationCreated }: Home
                     >
                       {msg.role === "assistant" && msg.response?.type === "route" ? (
                         <RouteResult data={msg.response.data as unknown as RouteData} />
+                      ) : msg.role === "assistant" && msg.response?.type === "schedule" ? (
+                        <ScheduleResult data={msg.response.data as unknown as ScheduleData} />
                       ) : (
                         <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
                       )}
@@ -280,12 +284,34 @@ function RouteResult({ data }: { data: RouteData }) {
   );
 }
 
+function ScheduleResult({ data }: { data: ScheduleData }) {
+  const { colors } = useTheme();
+  return (
+    <div>
+      {data.answer && (
+        <p className={`text-sm ${colors.text} mb-3 whitespace-pre-wrap`}>{data.answer}</p>
+      )}
+      {data.itineraries && data.itineraries.length > 0 && (
+        <ScheduleSteps
+          itineraries={data.itineraries}
+          origin={data.origin}
+          destination={data.destination}
+          deadline={data.deadline}
+        />
+      )}
+    </div>
+  );
+}
+
 function formatResponse(res: QueryResponse): string {
   if (res.type === "error") {
     return (res.data as { message: string }).message;
   }
   if (res.type === "answer") {
     return (res.data as { answer: string }).answer;
+  }
+  if (res.type === "schedule") {
+    return (res.data as { answer?: string }).answer ?? "";
   }
   return "";
 }

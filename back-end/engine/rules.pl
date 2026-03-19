@@ -6,6 +6,7 @@ line_display_name(bts_silom,        'BTS Silom Line').
 line_display_name(gold,             'BTS Gold Line').
 line_display_name(mrt_blue,         'MRT Blue Line').
 line_display_name(airport_rail_link,'Airport Rail Link').
+line_display_name(transfer_walk,    'Transfer (Walk)').
 
 /*
 Matching Logic

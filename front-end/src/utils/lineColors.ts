@@ -7,6 +7,13 @@ const LINE_COLORS: Record<string, string> = {
   brt: "#e87722",
   srt_dark_red: "#8b1a1a",
   srt_light_red: "#d44a4a",
+  // Display name variants (used by schedule results from Prolog)
+  "BTS Sukhumvit Line": "#5a9a2f",
+  "BTS Silom Line": "#8b6914",
+  "MRT Blue Line": "#1a3c8f",
+  "BTS Gold Line": "#d4a017",
+  "Airport Rail Link": "#c4161c",
+  "Transfer (Walk)": "#f59e0b",
 };
 
 const LINE_DISPLAY_NAMES: Record<string, string> = {

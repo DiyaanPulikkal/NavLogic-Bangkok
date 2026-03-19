@@ -49,6 +49,9 @@ async def query(
     elif result["type"] == "route":
         answer_text = f"Route from {result['data'].get('from', '')} to {result['data'].get('to', '')}"
         response_data = result
+    elif result["type"] == "schedule":
+        answer_text = result["data"].get("answer", f"Schedule from {result['data'].get('origin', '')} to {result['data'].get('destination', '')}")
+        response_data = result
 
     if answer_text:
         crud.add_message(db, body.conversation_id, "model", answer_text, response_data=response_data)

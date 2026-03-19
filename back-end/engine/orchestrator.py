@@ -50,6 +50,10 @@ class Orchestrator:
         if function_name == 'find_route':
             return self._handle_find_route(arguments), history
 
+        # Schedule-based trip planning
+        if function_name == 'plan_trip':
+            return self._handle_plan_trip(arguments, history)
+
         # Knowledge-base queries
         if function_name in STATION_ARG_KEYS:
             for key in STATION_ARG_KEYS[function_name]:
@@ -82,6 +86,111 @@ class Orchestrator:
         if result["type"] == "route":
             return self._format_route_text(result["data"])
         return result["data"].get("answer", str(result["data"]))
+
+    # ------------------------------------------------------------------
+    # Schedule / Trip Planning
+    # ------------------------------------------------------------------
+
+    def _handle_plan_trip(self, arguments: dict, history: list) -> tuple[dict, list]:
+        origin_raw = arguments['origin']
+        destination_raw = arguments['destination']
+        deadline_str = arguments.get('deadline', '09:00')
+
+        # Resolve station names
+        origin = self._resolve_location(origin_raw)
+        if origin is None:
+            return {"type": "error", "data": {"message": f"Unknown location: '{origin_raw}'."}}, history
+        destination = self._resolve_location(destination_raw)
+        if destination is None:
+            return {"type": "error", "data": {"message": f"Unknown location: '{destination_raw}'."}}, history
+
+        # Parse deadline from HH:MM to HHMM integer
+        deadline = self._parse_time(deadline_str)
+        if deadline is None:
+            return {"type": "error", "data": {"message": f"Invalid time format: '{deadline_str}'. Use HH:MM."}}, history
+
+        logger.info("Planning trip: %s → %s by %d", origin, destination, deadline)
+        itineraries = self.prolog.plan_trip(origin, destination, deadline)
+
+        if not itineraries:
+            result = {
+                "type": "answer",
+                "data": {"answer": f"No scheduled trips found from {origin} to {destination} arriving by {deadline_str}."}
+            }
+            return result, history
+
+        result = {
+            "type": "schedule",
+            "data": {
+                "origin": origin,
+                "destination": destination,
+                "deadline": deadline_str,
+                "itineraries": itineraries,
+            }
+        }
+
+        formatted, history = self.llm.format_prolog_result(
+            "plan_trip",
+            result=result,
+            history=history,
+        )
+        return formatted, history
+
+    @staticmethod
+    def _parse_time(time_str: str) -> int | None:
+        """Parse 'HH:MM' or 'HHMM' into integer HHMM."""
+        time_str = time_str.strip()
+        if ':' in time_str:
+            parts = time_str.split(':')
+            if len(parts) == 2:
+                try:
+                    h, m = int(parts[0]), int(parts[1])
+                    if 0 <= h <= 23 and 0 <= m <= 59:
+                        return h * 100 + m
+                except ValueError:
+                    return None
+        else:
+            try:
+                val = int(time_str)
+                if 0 <= val <= 2359:
+                    return val
+            except ValueError:
+                return None
+        return None
+
+    # ------------------------------------------------------------------
+    # Schedule direct query (bypass LLM, used by API)
+    # ------------------------------------------------------------------
+
+    def plan_trip(self, origin: str, destination: str, deadline: str) -> dict:
+        """Direct schedule query without LLM — used by the /api/schedule endpoint."""
+        origin_resolved = self._resolve_location(origin)
+        if origin_resolved is None:
+            return {"type": "error", "data": {"message": f"Unknown location: '{origin}'."}}
+        destination_resolved = self._resolve_location(destination)
+        if destination_resolved is None:
+            return {"type": "error", "data": {"message": f"Unknown location: '{destination}'."}}
+
+        deadline_int = self._parse_time(deadline)
+        if deadline_int is None:
+            return {"type": "error", "data": {"message": f"Invalid time format: '{deadline}'. Use HH:MM."}}
+
+        itineraries = self.prolog.plan_trip(origin_resolved, destination_resolved, deadline_int)
+        if not itineraries:
+            return {
+                "type": "error",
+                "data": {"message": f"No scheduled trips found from {origin_resolved} to {destination_resolved} arriving by {deadline}."}
+            }
+
+        return {
+            "type": "schedule",
+            "data": {
+                "origin": origin_resolved,
+                "destination": destination_resolved,
+                "deadline": deadline,
+                "itineraries": itineraries,
+            }
+        }
 
     # ------------------------------------------------------------------
     # Route handling

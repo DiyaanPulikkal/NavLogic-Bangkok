@@ -1,4 +1,4 @@
-import type { StationInfo, AttractionInfo, ApiRouteResult } from "../types";
+import type { StationInfo, AttractionInfo, ApiRouteResult, ScheduleData } from "../types";
 
 const BASE = "/api";
 
@@ -29,8 +29,24 @@ export async function fetchRoute(
   return res.json();
 }
 
+export interface ScheduleResult {
+  type: "schedule";
+  data: ScheduleData;
+}
+
+export async function fetchSchedule(
+  origin: string,
+  destination: string,
+  deadline: string = "09:00"
+): Promise<ScheduleResult | { type: "error"; data: { message: string } }> {
+  const params = new URLSearchParams({ origin, destination, deadline });
+  const res = await fetch(`${BASE}/schedule?${params}`);
+  if (!res.ok) throw new Error("Failed to fetch schedule");
+  return res.json();
+}
+
 export interface QueryResponse {
-  type: "route" | "answer" | "error";
+  type: "route" | "answer" | "error" | "schedule";
   data: Record<string, unknown>;
 }
 

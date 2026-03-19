@@ -35,4 +35,26 @@ export interface ErrorResponse {
   data: { message: string };
 }
 
+export interface ScheduleLeg {
+  from: string;
+  to: string;
+  line: string;
+  depart: string;
+  arrive: string;
+}
+
+export interface ScheduleData {
+  origin: string;
+  destination: string;
+  deadline: string;
+  itineraries: ScheduleLeg[][];
+  answer?: string;
+}
+
+export interface ScheduleResponse {
+  type: "schedule";
+  data: ScheduleData;
+}
+
 export type ApiRouteResult = RouteResponse | ErrorResponse;
+export type ApiResult = RouteResponse | ScheduleResponse | ErrorResponse | { type: "answer"; data: { answer: string } };

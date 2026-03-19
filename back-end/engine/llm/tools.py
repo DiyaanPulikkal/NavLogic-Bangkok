@@ -122,6 +122,37 @@ attraction_near_station = {
     }
 }
 
+plan_trip = {
+    "name": "plan_trip",
+    "description": (
+        "Plan a time-constrained trip using the transit schedule. "
+        "Use this when the user wants to arrive somewhere by a specific time, "
+        "asks about departure/arrival times, or wants a scheduled itinerary. "
+        "This uses the timetable to find valid connections."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "origin": {
+                "type": "string",
+                "description": "The starting station name as the user said it (e.g. 'Mo Chit', 'Siam')."
+            },
+            "destination": {
+                "type": "string",
+                "description": "The destination station name as the user said it (e.g. 'Asok', 'Hua Lamphong')."
+            },
+            "deadline": {
+                "type": "string",
+                "description": (
+                    "The latest acceptable arrival time in HH:MM 24-hour format "
+                    "(e.g. '08:00', '09:30'). If the user doesn't specify, use '09:00' as default."
+                )
+            }
+        },
+        "required": ["origin", "destination", "deadline"]
+    }
+}
+
 FUNCTION_DECLARATIONS = [
     find_route,
     line_of,
@@ -129,4 +160,5 @@ FUNCTION_DECLARATIONS = [
     is_transfer_station,
     needs_transfer,
     attraction_near_station,
+    plan_trip,
 ]

@@ -80,3 +80,26 @@ class StationInfo(BaseModel):
 class AttractionInfo(BaseModel):
     name: str
     station: str
+
+
+# ── Schedule / Trip Planning ──
+
+class ScheduleRequest(BaseModel):
+    origin: str
+    destination: str
+    deadline: str  # HH:MM format
+
+
+class ScheduleLeg(BaseModel):
+    from_station: str
+    to_station: str
+    line: str
+    depart: str
+    arrive: str
+
+
+class ScheduleData(BaseModel):
+    origin: str
+    destination: str
+    deadline: str
+    itineraries: list[list[ScheduleLeg]]
