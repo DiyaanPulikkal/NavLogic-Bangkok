@@ -23,8 +23,14 @@ def test_create_conversation_default_title(auth_client, auth_headers):
     assert resp.json()["title"] == "New conversation"
 
 
-def test_create_conversation_unauthenticated(auth_client):
+def test_conversation_unauthenticated(auth_client):
     resp = auth_client.post("/api/conversations", json={"title": "test"})
+    assert resp.status_code in (401, 403)
+
+    resp = auth_client.get("/api/conversations")
+    assert resp.status_code in (401, 403)
+
+    resp = auth_client.get("/api/conversations/1")
     assert resp.status_code in (401, 403)
 
 
@@ -134,3 +140,53 @@ def test_conversation_isolation(auth_client, db_session):
     # User B's list is empty
     resp = auth_client.get("/api/conversations", headers=headers_b)
     assert resp.json() == []
+
+def test_rename_conversation_invalid_title(auth_client, auth_headers):
+    create_resp = auth_client.post(
+        "/api/conversations",
+        json={"title": "Valid"},
+        headers=auth_headers,
+    )
+    conv_id = create_resp.json()["id"]
+
+    resp = auth_client.patch(
+        f"/api/conversations/{conv_id}",
+        json={"title": ""},  # invalid
+        headers=auth_headers,
+    )
+
+    assert resp.status_code == 422
+
+def test_delete_conversation_twice(auth_client, auth_headers):
+    create_resp = auth_client.post(
+        "/api/conversations",
+        json={"title": "Temp"},
+        headers=auth_headers,
+    )
+    conv_id = create_resp.json()["id"]
+
+    auth_client.delete(f"/api/conversations/{conv_id}", headers=auth_headers)
+
+    resp = auth_client.delete(f"/api/conversations/{conv_id}", headers=auth_headers)
+    assert resp.status_code == 404
+
+def test_list_conversations_order(auth_client, auth_headers):
+    auth_client.post("/api/conversations", json={"title": "First"}, headers=auth_headers)
+    auth_client.post("/api/conversations", json={"title": "Second"}, headers=auth_headers)
+
+    resp = auth_client.get("/api/conversations", headers=auth_headers)
+    data = resp.json()
+
+    assert data[0]["title"] == "Second"
+
+def test_create_conversation_title_too_long(auth_client, auth_headers):
+    long_title = "a" * 100
+
+    resp = auth_client.post(
+        "/api/conversations",
+        json={"title": long_title},
+        headers=auth_headers,
+    )
+
+    assert resp.status_code == 422
+

@@ -32,6 +32,8 @@ def decode_token(token: str, expected_type: str = "access") -> dict:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         if payload.get("type") != expected_type:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
+        if "sub" not in payload:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing subject")
         return payload
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")

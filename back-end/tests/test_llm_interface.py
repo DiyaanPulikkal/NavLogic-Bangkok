@@ -81,3 +81,82 @@ def test_translate_to_query_exception(monkeypatch):
     result, history = llm.translate_to_query("line", [])
     assert result is None
     assert isinstance(history, list)
+
+def test_translate_uses_first_candidate(monkeypatch):
+    fc1 = FakeFunctionCall("line_of", {"station_name": "Siam"})
+    fc2 = FakeFunctionCall("route", {"from": "A", "to": "B"})
+
+    response = SimpleNamespace(
+        candidates=[
+            FakeCandidate([FakePart(function_call=fc1)]),
+            FakeCandidate([FakePart(function_call=fc2)]),
+        ]
+    )
+    setup_llm(monkeypatch, response=response)
+
+    llm = llm_module.LLMInterface()
+    result, _ = llm.translate_to_query("line", [])
+
+    assert result == ("line_of", {"station_name": "Siam"})
+
+def test_translate_empty_candidates(monkeypatch):
+    response = SimpleNamespace(candidates=[])
+    setup_llm(monkeypatch, response=response)
+
+    llm = llm_module.LLMInterface()
+    result, history = llm.translate_to_query("line", [])
+
+    assert result is None
+    assert isinstance(history, list)
+
+def test_translate_candidate_no_parts(monkeypatch):
+    response = SimpleNamespace(
+        candidates=[SimpleNamespace(content=SimpleNamespace(parts=[]))]
+    )
+    setup_llm(monkeypatch, response=response)
+
+    llm = llm_module.LLMInterface()
+    result, _ = llm.translate_to_query("line", [])
+
+    assert result is None
+
+def test_function_call_takes_priority_over_text(monkeypatch):
+    function_call = FakeFunctionCall("line_of", {"station_name": "Siam"})
+    response = SimpleNamespace(
+        candidates=[
+            FakeCandidate([
+                FakePart(function_call=function_call),
+                FakePart(text="Ignore this"),
+            ])
+        ]
+    )
+    setup_llm(monkeypatch, response=response)
+
+    llm = llm_module.LLMInterface()
+    result, _ = llm.translate_to_query("line", [])
+
+    assert result == ("line_of", {"station_name": "Siam"})
+
+def test_function_call_with_invalid_args(monkeypatch):
+    function_call = FakeFunctionCall("line_of", None)
+    response = SimpleNamespace(
+        candidates=[FakeCandidate([FakePart(function_call=function_call)])]
+    )
+    setup_llm(monkeypatch, response=response)
+
+    llm = llm_module.LLMInterface()
+    result, _ = llm.translate_to_query("line", [])
+
+    assert result is None
+    
+def test_history_is_appended(monkeypatch):
+    response = SimpleNamespace(
+        candidates=[FakeCandidate([FakePart(text="Hello")])]
+    )
+    setup_llm(monkeypatch, response=response)
+
+    llm = llm_module.LLMInterface()
+    history = []
+    _, new_history = llm.translate_to_query("hello", history)
+
+    assert len(new_history) > len(history)

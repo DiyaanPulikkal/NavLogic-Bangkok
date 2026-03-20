@@ -147,3 +147,39 @@ def test_cascade_delete_messages(db_session):
     # Messages should be gone
     messages = crud.get_messages_for_conversation(db_session, conv.id)
     assert messages == []
+
+def test_create_user_duplicate_email(db_session):
+    crud.create_user(db_session, "dup@example.com", hash_password("pw"))
+
+    import pytest
+    with pytest.raises(Exception):
+        crud.create_user(db_session, "dup@example.com", hash_password("pw"))
+    
+def test_messages_are_ordered(db_session):
+    user = crud.create_user(db_session, "u@example.com", hash_password("pw"))
+    conv = crud.create_conversation(db_session, user.id, "Chat")
+
+    crud.add_message(db_session, conv.id, "user", "First")
+    crud.add_message(db_session, conv.id, "user", "Second")
+
+    messages = crud.get_messages_for_conversation(db_session, conv.id)
+
+    assert messages[0].content == "First"
+    assert messages[1].content == "Second"
+
+def test_add_message_invalid_conversation(db_session):
+    import pytest
+    with pytest.raises(Exception):
+        crud.add_message(db_session, 9999, "user", "Hello")
+
+def test_update_conversation_wrong_user(db_session):
+    user_a = crud.create_user(db_session, "a@example.com", hash_password("pw"))
+    user_b = crud.create_user(db_session, "b@example.com", hash_password("pw"))
+    conv = crud.create_conversation(db_session, user_a.id, "Chat")
+
+    result = crud.update_conversation_title(db_session, conv.id, user_b.id, "Hack")
+    assert result is None
+
+def test_touch_conversation_not_found(db_session):
+    result = crud.touch_conversation(db_session, 9999)
+    assert result is None or result is False

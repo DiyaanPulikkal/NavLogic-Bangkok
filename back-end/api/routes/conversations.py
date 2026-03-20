@@ -16,6 +16,8 @@ def create_conversation(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if len(body.title.strip()) > 60:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Title cannot be empty")
     conv = crud.create_conversation(db, user.id, body.title)
     return ConversationOut(id=conv.id, title=conv.title, created_at=conv.created_at, updated_at=conv.updated_at)
 
@@ -61,6 +63,8 @@ def rename_conversation(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if body.title.strip() == "":
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Title cannot be empty")
     conv = crud.update_conversation_title(db, conversation_id, user.id, body.title)
     if not conv:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")

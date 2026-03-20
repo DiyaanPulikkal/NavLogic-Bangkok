@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, Depends
+from fastapi import APIRouter, Request, Depends, HTTPException
 from google.genai import types
 from sqlalchemy.orm import Session
 
@@ -30,6 +30,10 @@ async def query(
     db: Session = Depends(get_db),
 ):
     orchestrator = request.app.state.orchestrator
+
+    conversation = crud.get_conversation(db, body.conversation_id, user.id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
 
     # Load existing messages and rebuild history
     db_messages = crud.get_messages_for_conversation(db, body.conversation_id)

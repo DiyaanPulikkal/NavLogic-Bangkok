@@ -86,3 +86,31 @@ def test_post_query(auth_client, auth_headers, db_session):
 def test_post_query_unauthenticated(client):
     resp = client.post("/api/query", json={"message": "hello", "conversation_id": 1})
     assert resp.status_code in (401, 403)
+
+def test_get_route_missing_start(client):
+    resp = client.get("/api/route", params={"end": "Asok"})
+    assert resp.status_code in (400, 422)
+
+def test_get_schedule(client):
+    resp = client.get("/api/schedule", params={
+        "origin": "Siam",
+        "destination": "Asok",
+        "deadline": "09:00"
+    })
+    assert resp.status_code == 200
+
+def test_post_query_invalid_conversation(auth_client, auth_headers):
+    from tests.helpers import StubLLM
+
+    # Stub LLM to prevent crash
+    auth_client.app.state.orchestrator.llm = StubLLM(
+        ("find_route", {"start": "Siam", "end": "Asok"})
+    )
+
+    resp = auth_client.post(
+        "/api/query",
+        json={"message": "hello", "conversation_id": 99999},
+        headers=auth_headers,
+    )
+
+    assert resp.status_code in (400, 404)

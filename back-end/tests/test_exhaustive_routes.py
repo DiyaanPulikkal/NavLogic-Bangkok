@@ -24,3 +24,21 @@ def test_exhaustive_find_route_all_pairs():
                 computed_cost += weights[(a, b)]
 
             assert computed_cost == cost
+            assert cost >= 0, f"Negative cost detected: {cost}"
+
+def test_route_symmetry():
+    orchestrator = OrchestratorNoLLM()
+    edges = orchestrator.prolog.get_all_edges()
+    graph, weights = build_graph_and_weights(edges)
+
+    stations = sorted(orchestrator.prolog.get_all_station_names())
+
+    for start in stations:
+        for end in stations:
+            if start == end:
+                continue
+
+            path1, cost1 = orchestrator._dijkstra(graph, start, end)
+            path2, cost2 = orchestrator._dijkstra(graph, end, start)
+
+            assert cost1 == cost2, f"Asymmetric cost: {start}->{end} vs {end}->{start}"

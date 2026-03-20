@@ -94,3 +94,40 @@ def test_refresh_invalid_token(auth_client):
         "refresh_token": "not.a.valid.token",
     })
     assert resp.status_code == 401
+
+def test_register_missing_fields(auth_client):
+    resp = auth_client.post("/api/auth/register", json={})
+    assert resp.status_code == 422
+
+def test_register_empty_password(auth_client):
+    resp = auth_client.post("/api/auth/register", json={
+        "email": "user@example.com",
+        "password": "",
+    })
+    assert resp.status_code == 422
+
+def test_refresh_token_reuse(auth_client, test_user):
+    _, password = test_user
+    login_resp = auth_client.post("/api/auth/login", json={
+        "email": "test@example.com",
+        "password": password,
+    })
+
+    refresh_token = login_resp.json()["refresh_token"]
+
+    # First use
+    resp1 = auth_client.post("/api/auth/refresh", json={
+        "refresh_token": refresh_token,
+    })
+    assert resp1.status_code == 200
+
+    # Second use (depends on your design)
+    resp2 = auth_client.post("/api/auth/refresh", json={
+        "refresh_token": refresh_token,
+    })
+
+    assert resp2.status_code == 200  
+
+def test_login_missing_fields(auth_client):
+    resp = auth_client.post("/api/auth/login", json={})
+    assert resp.status_code == 422

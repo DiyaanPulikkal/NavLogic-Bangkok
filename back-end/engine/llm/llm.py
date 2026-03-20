@@ -28,8 +28,9 @@ class LLMInterface:
 
     def translate_to_query(self, user_input: str, history: list):
         try:
+            new_history = list(history)
             logger.info("Sending query to Gemini...")
-            history.append(
+            new_history.append(
                 types.Content(
                     role="user", parts=[types.Part(text=user_input)]
                 )
@@ -37,10 +38,10 @@ class LLMInterface:
             response = self.client.models.generate_content(
                 model=self.model,
                 config=self.config,
-                contents=history,
+                contents=new_history,
             )
             if response.candidates:
-                history.append(response.candidates[0].content)
+                new_history.append(response.candidates[0].content)
                 first_candidate = response.candidates[0]
 
                 for part in first_candidate.content.parts:
@@ -49,7 +50,7 @@ class LLMInterface:
                         arguments = dict(part.function_call.args)
                         args_str = ", ".join(f"{k}={v!r}" for k, v in arguments.items())
                         logger.info("Gemini returned function call: %s(%s)", function_name, args_str)
-                        return (function_name, arguments), history
+                        return (function_name, arguments), new_history
 
             logger.info("Gemini returned no function call")
             # Model returned text instead of function call — extract it
@@ -59,7 +60,7 @@ class LLMInterface:
                     if part.text:
                         text_response = part.text
                         break
-            return text_response, history
+            return text_response, new_history
         except Exception as e:
             logger.error("Error during model generation: %s", e)
             return None, history

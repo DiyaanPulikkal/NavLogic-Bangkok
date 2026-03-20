@@ -22,6 +22,8 @@ def _make_tokens(user_id: int) -> TokenResponse:
 def register(body: RegisterRequest, db: Session = Depends(get_db)):
     if crud.get_user_by_email(db, body.email):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+    if body.password is None or body.password.strip() == "" :
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Password cannot be empty")
     user = crud.create_user(db, body.email, hash_password(body.password))
     return _make_tokens(user.id)
 

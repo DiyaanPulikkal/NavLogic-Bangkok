@@ -44,3 +44,27 @@ def test_prolog_helpers():
 
     stations = interface.get_all_station_names()
     assert "Siam (CEN)" in stations
+
+def test_query_empty_string():
+    interface = PrologInterface()
+    assert interface.query("") is None
+
+def test_query_malformed_but_structured():
+    interface = PrologInterface()
+    # Looks like Prolog but invalid syntax
+    result = interface.query("line_of(Siam, Line)")
+    assert result is None or "Error" in str(result)
+
+def test_station_names_match_station_lines():
+    interface = PrologInterface()
+
+    stations = set(interface.get_all_station_names())
+    station_lines = set(interface.get_station_lines().keys())
+
+    assert stations == station_lines
+
+def test_query_no_results():
+    interface = PrologInterface()
+    result = interface.query("line_of('Nonexistent Station', Line).")
+    
+    assert result == [] or result is None
