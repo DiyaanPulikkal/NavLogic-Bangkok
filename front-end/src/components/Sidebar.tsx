@@ -54,7 +54,7 @@ export default function Sidebar({
           >
             <div className="flex items-center justify-between px-4 pt-4 pb-2">
               <span className={`font-semibold text-base whitespace-nowrap tracking-tight ${theme === "dark" ? "text-gray-100" : "text-gray-900"}`}>
-                <TrainFront size={18} className="text-[#e87722] mr-1.5 inline-block" />Bangkok Transit
+                <TrainFront size={18} className="text-[#e87722] mr-1.5 inline-block" /> NavLogic - Bangkok
               </span>
               <button
                 onClick={onToggle}

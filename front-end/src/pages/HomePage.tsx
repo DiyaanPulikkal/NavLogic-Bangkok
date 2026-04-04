@@ -140,7 +140,7 @@ export default function HomePage({ conversationId, onConversationCreated }: Home
               </span>
             </div>
             <h1 className={`text-2xl font-semibold ${colors.text} tracking-tight`}>
-              Bangkok Transit
+              NavLogic - Bangkok
             </h1>
             <p className={`text-sm ${colors.textMuted} mt-1.5`}>
               Routes, schedules, and day plans across BTS, MRT & more
