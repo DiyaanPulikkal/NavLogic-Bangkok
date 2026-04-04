@@ -4,11 +4,9 @@ import { TrainFront } from "lucide-react";
 import { useTheme } from "../context/ThemeContext";
 import { useAuth } from "../context/AuthContext";
 import {
-  listConversations,
   deleteConversation,
   type ConversationInfo,
 } from "../api/client";
-import { useState, useEffect, useCallback } from "react";
 
 interface Props {
   open: boolean;

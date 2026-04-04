@@ -25,10 +25,7 @@ function AppLayout() {
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
 
   const refreshConversations = useCallback(async () => {
-    if (!isAuthenticated) {
-      setConversations([]);
-      return;
-    }
+    if (!isAuthenticated) return;
     try {
       const convs = await listConversations();
       setConversations(convs);
@@ -38,8 +35,13 @@ function AppLayout() {
   }, [isAuthenticated]);
 
   useEffect(() => {
-    refreshConversations();
-  }, [refreshConversations]);
+    if (!isAuthenticated) return;
+    let cancelled = false;
+    listConversations()
+      .then((convs) => { if (!cancelled) setConversations(convs); })
+      .catch(() => { if (!cancelled) setConversations([]); });
+    return () => { cancelled = true; };
+  }, [isAuthenticated]);
 
   const handleConversationCreated = useCallback((id: number) => {
     setActiveConversationId(id);
@@ -51,7 +53,7 @@ function AppLayout() {
       <Sidebar
         open={sidebarOpen}
         onToggle={() => setSidebarOpen((v) => !v)}
-        conversations={conversations}
+        conversations={isAuthenticated ? conversations : []}
         activeConversationId={activeConversationId}
         onSelectConversation={setActiveConversationId}
         onConversationsChange={refreshConversations}
