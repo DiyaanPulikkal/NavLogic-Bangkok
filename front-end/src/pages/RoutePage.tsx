@@ -15,26 +15,51 @@ export default function RoutePage() {
 
   const [route, setRoute] = useState<RouteData | null>(null);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(Boolean(from && to));
+  const [prevFrom, setPrevFrom] = useState(from);
+  const [prevTo, setPrevTo] = useState(to);
+  if (from !== prevFrom || to !== prevTo) {
+    setPrevFrom(from);
+    setPrevTo(to);
+    if (from && to) setLoading(true);
+  }
 
   useEffect(() => {
-    if (!from || !to) {
-      setError("Missing start or destination.");
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
+    if (!from || !to) return;
+    let cancelled = false;
     fetchRoute(from, to)
       .then((res: ApiRouteResult) => {
+        if (cancelled) return;
         if (res.type === "error") {
           setError(res.data.message);
         } else {
           setRoute(res.data);
         }
       })
-      .catch(() => setError("Failed to fetch route."))
-      .finally(() => setLoading(false));
+      .catch(() => { if (!cancelled) setError("Failed to fetch route."); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [from, to]);
+
+  if (!from || !to) {
+    return (
+      <div className={`h-screen flex flex-col items-center justify-center gap-4 px-4 ${colors.bg}`}>
+        <motion.div
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="text-center"
+        >
+          <p className="text-red-400 text-lg font-medium">Missing start or destination.</p>
+          <button
+            onClick={() => navigate("/")}
+            className={`mt-4 px-6 py-2 ${colors.bgSecondary} ${colors.textSecondary} rounded-xl text-sm transition-colors border-none cursor-pointer`}
+          >
+            ← Back
+          </button>
+        </motion.div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (

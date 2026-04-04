@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -317,9 +317,8 @@ const loadingPhrases = [
 
 function LoadingIndicator() {
   const { colors } = useTheme();
-  const phrase = useMemo(
-    () => loadingPhrases[Math.floor(Math.random() * loadingPhrases.length)],
-    []
+  const [phrase] = useState(
+    () => loadingPhrases[Math.floor(Math.random() * loadingPhrases.length)]
   );
 
   return (

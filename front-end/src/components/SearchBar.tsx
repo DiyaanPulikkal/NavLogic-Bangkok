@@ -12,9 +12,12 @@ interface Props {
 export default function SearchBar({ stations, label, value, onChange }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState(value);
+  const [prevValue, setPrevValue] = useState(value);
+  if (value !== prevValue) {
+    setPrevValue(value);
+    setQuery(value);
+  }
   const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => setQuery(value), [value]);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {

@@ -56,7 +56,7 @@ export default function DayPlanSteps({ legs, origin }: Props) {
               <div className={`text-[11px] font-medium ${colors.textMuted} mb-2 uppercase tracking-wider`}>Transit</div>
               <div className="flex flex-col gap-0">
                 {leg.itineraries[0].map((segment, j) => (
-                  <LegSegment key={j} segment={segment} index={j} />
+                  <LegSegment key={j} segment={segment} />
                 ))}
               </div>
             </div>
@@ -150,7 +150,7 @@ function CompactRouteStep({ step }: { step: RouteStep }) {
   );
 }
 
-function LegSegment({ segment, index }: { segment: ScheduleLeg; index: number }) {
+function LegSegment({ segment }: { segment: ScheduleLeg }) {
   const { colors } = useTheme();
   const isTransfer = segment.line.toLowerCase().includes("transfer") || segment.line.toLowerCase().includes("walk");
   const color = isTransfer ? "#f59e0b" : getLineColor(segment.line);

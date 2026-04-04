@@ -114,3 +114,64 @@ def test_post_query_invalid_conversation(auth_client, auth_headers):
     )
 
     assert resp.status_code in (400, 404)
+
+
+# ── Schedule endpoint edge cases ──
+
+def test_get_schedule_with_itineraries(client):
+    resp = client.get("/api/schedule", params={
+        "origin": "Mo Chit",
+        "destination": "Siam",
+        "deadline": "08:00",
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["type"] == "schedule"
+    assert len(data["data"]["itineraries"]) > 0
+
+
+def test_get_schedule_unknown_origin(client):
+    resp = client.get("/api/schedule", params={
+        "origin": "Narnia",
+        "destination": "Siam",
+        "deadline": "08:00",
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["type"] == "error"
+    assert "Unknown location" in data["data"]["message"]
+
+
+def test_get_schedule_unknown_destination(client):
+    resp = client.get("/api/schedule", params={
+        "origin": "Siam",
+        "destination": "Narnia",
+        "deadline": "08:00",
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["type"] == "error"
+
+
+def test_get_schedule_invalid_deadline(client):
+    resp = client.get("/api/schedule", params={
+        "origin": "Siam",
+        "destination": "Asok",
+        "deadline": "invalid",
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["type"] == "error"
+    assert "Invalid time" in data["data"]["message"]
+
+
+def test_get_schedule_no_service(client):
+    resp = client.get("/api/schedule", params={
+        "origin": "Mo Chit",
+        "destination": "Siam",
+        "deadline": "06:00",
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["type"] == "error"
+    assert "No scheduled trips" in data["data"]["message"]
