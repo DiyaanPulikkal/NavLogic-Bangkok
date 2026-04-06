@@ -33,7 +33,7 @@ class FakeClient:
 
 
 def setup_llm(monkeypatch, response=None, error=None):
-    monkeypatch.setattr(llm_module.genai, "Client", lambda: FakeClient(response, error))
+    monkeypatch.setattr(llm_module, "_create_genai_client", lambda: FakeClient(response, error))
     monkeypatch.setattr(llm_module.types, "Tool", lambda **_kwargs: object())
     monkeypatch.setattr(llm_module.types, "GenerateContentConfig", lambda **_kwargs: object())
 
