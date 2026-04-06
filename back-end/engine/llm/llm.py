@@ -11,9 +11,18 @@ load_dotenv()
 logger = logging.getLogger("llm")
 
 
+def _create_genai_client():
+    if not os.environ.get("GOOGLE_API_KEY"):
+        raise RuntimeError(
+            "GOOGLE_API_KEY is not set. "
+            "Create a back-end/.env file with: GOOGLE_API_KEY=your-key-here"
+        )
+    return genai.Client()
+
+
 class LLMInterface:
     def __init__(self):
-        self.client = genai.Client()
+        self.client = _create_genai_client()
         self.model = MODEL
         self.tools = types.Tool(function_declarations=FUNCTION_DECLARATIONS)
 

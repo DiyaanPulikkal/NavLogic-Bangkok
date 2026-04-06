@@ -15,3 +15,9 @@ skills-lock.json
 .claude
 *.excalidraw
 CLAUDE.md
+
+# project-report documents
+project-report
+
+# MacOS
+.DS_Store

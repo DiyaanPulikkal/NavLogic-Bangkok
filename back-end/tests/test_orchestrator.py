@@ -312,15 +312,15 @@ def _make_reachable(costs):
             for i, c in enumerate(costs)]
 
 
-def test_select_day_trip_stops_under_max():
+def test_select_explore_stops_under_max():
     items = _make_reachable([5, 15, 25])
-    result = Orchestrator._select_day_trip_stops(items, max_stops=4)
+    result = Orchestrator._select_explore_stops(items, max_stops=4)
     assert len(result) == 3
 
 
-def test_select_day_trip_stops_filters_close():
+def test_select_explore_stops_filters_close():
     items = _make_reachable([0, 3, 10, 13, 20, 25])
-    result = Orchestrator._select_day_trip_stops(items, max_stops=4)
+    result = Orchestrator._select_explore_stops(items, max_stops=4)
     assert len(result) == 4
     costs = [r["cost"] for r in result]
     assert costs[0] == 0
@@ -328,26 +328,10 @@ def test_select_day_trip_stops_filters_close():
     assert 3 not in costs
 
 
-def test_select_day_trip_stops_backfills():
+def test_select_explore_stops_backfills():
     items = _make_reachable([0, 1, 2, 3, 4])
-    result = Orchestrator._select_day_trip_stops(items, max_stops=4)
+    result = Orchestrator._select_explore_stops(items, max_stops=4)
     assert len(result) == 4
-
-
-# ── _select_nightlife_stops ──
-
-def test_select_nightlife_stops_under_max():
-    items = _make_reachable([5, 15])
-    result = Orchestrator._select_nightlife_stops(items, max_stops=3)
-    assert len(result) == 2
-
-
-def test_select_nightlife_stops_filters_close():
-    items = _make_reachable([0, 3, 10, 20, 30])
-    result = Orchestrator._select_nightlife_stops(items, max_stops=3)
-    assert len(result) == 3
-    costs = [r["cost"] for r in result]
-    assert 3 not in costs
 
 
 # ── _rank_candidates ──
@@ -524,57 +508,48 @@ def test_handle_plan_day_unknown_stop():
     assert "Unknown location" in result["data"]["message"]
 
 
-# ── _handle_plan_day_trip ──
+# ── _handle_plan_explore ──
 
-def test_handle_plan_day_trip_success():
+def test_handle_plan_explore_daytime_success():
     orchestrator = make_orchestrator_with_llm_result(
-        ("plan_day_trip", {"origin": "Siam", "start_time": "09:00", "end_time": "17:00"})
+        ("plan_explore", {"origin": "Siam", "start_time": "09:00", "end_time": "17:00"})
     )
     result, _ = orchestrator.handle("plan day trip")
-    assert result["type"] == "day_plan"
+    assert result["type"] == "explore"
     assert "stops" in result["data"]
     assert "legs" in result["data"]
     assert len(result["data"]["legs"]) > 0
     for leg in result["data"]["legs"]:
         assert "attractions" in leg
+    # Daytime trip → no last_train_note
+    assert result["data"]["last_train_note"] is None
 
 
-def test_handle_plan_day_trip_unknown_origin():
+def test_handle_plan_explore_nighttime_success():
     orchestrator = make_orchestrator_with_llm_result(
-        ("plan_day_trip", {"origin": "Narnia", "start_time": "09:00", "end_time": "17:00"})
-    )
-    result, _ = orchestrator.handle("plan day trip")
-    assert result["type"] == "error"
-    assert "Unknown location" in result["data"]["message"]
-
-
-# ── _handle_plan_nightlife ──
-
-def test_handle_plan_nightlife_success():
-    orchestrator = make_orchestrator_with_llm_result(
-        ("plan_nightlife", {"origin": "Siam", "start_time": "19:00", "end_time": "02:00"})
+        ("plan_explore", {"origin": "Siam", "start_time": "19:00", "end_time": "02:00"})
     )
     result, _ = orchestrator.handle("plan nightlife")
-    assert result["type"] == "nightlife"
+    assert result["type"] == "explore"
     assert "legs" in result["data"]
     assert len(result["data"]["legs"]) > 0
     # end_time 02:00 is past midnight → last_train_note should be set
     assert result["data"]["last_train_note"] is not None
 
 
-def test_handle_plan_nightlife_unknown_origin():
+def test_handle_plan_explore_unknown_origin():
     orchestrator = make_orchestrator_with_llm_result(
-        ("plan_nightlife", {"origin": "Narnia", "start_time": "19:00", "end_time": "02:00"})
+        ("plan_explore", {"origin": "Narnia", "start_time": "09:00", "end_time": "17:00"})
     )
-    result, _ = orchestrator.handle("plan nightlife")
+    result, _ = orchestrator.handle("explore Bangkok")
     assert result["type"] == "error"
     assert "Unknown location" in result["data"]["message"]
 
 
-def test_handle_plan_nightlife_no_late_note():
+def test_handle_plan_explore_no_late_note():
     orchestrator = make_orchestrator_with_llm_result(
-        ("plan_nightlife", {"origin": "Siam", "start_time": "19:00", "end_time": "22:00"})
+        ("plan_explore", {"origin": "Siam", "start_time": "19:00", "end_time": "22:00"})
     )
-    result, _ = orchestrator.handle("plan nightlife")
-    assert result["type"] == "nightlife"
+    result, _ = orchestrator.handle("plan evening")
+    assert result["type"] == "explore"
     assert result["data"]["last_train_note"] is None

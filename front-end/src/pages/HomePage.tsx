@@ -55,16 +55,17 @@ export default function HomePage({ conversationId, onConversationCreated }: Home
 
   const hasMessages = messages.length > 0 || loading;
 
-  // Load messages when conversationId changes
+  // Load messages when conversationId changes (skip if a send is in-flight)
   useEffect(() => {
     if (!conversationId) {
       setMessages([]);
       return;
     }
+    if (sendingRef.current) return;
     let cancelled = false;
     getConversation(conversationId)
       .then((conv) => {
-        if (cancelled) return;
+        if (cancelled || sendingRef.current) return;
         setMessages(
           conv.messages.map((m) => ({
             role: m.role === "user" ? "user" as const : "assistant" as const,
@@ -83,6 +84,10 @@ export default function HomePage({ conversationId, onConversationCreated }: Home
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
+  // Track whether sendMessage is in-flight so the conversationId
+  // useEffect doesn't clobber local messages with a stale DB fetch.
+  const sendingRef = useRef(false);
+
   const sendMessage = useCallback(async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || loading) return;
@@ -90,15 +95,17 @@ export default function HomePage({ conversationId, onConversationCreated }: Home
     setInput("");
     setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
     setLoading(true);
+    sendingRef.current = true;
 
     try {
       let activeConvId = conversationId;
+      let newConvId: number | null = null;
 
       // Auto-create conversation on first message
       if (!activeConvId) {
         const conv = await createConversation(trimmed.slice(0, 60));
         activeConvId = conv.id;
-        onConversationCreated(conv.id);
+        newConvId = conv.id;
       }
 
       const res = await postQuery(trimmed, activeConvId);
@@ -108,12 +115,17 @@ export default function HomePage({ conversationId, onConversationCreated }: Home
         response: res,
       };
       setMessages((prev) => [...prev, assistantMsg]);
+
+      // Notify parent only after the response is in local state,
+      // so the conversationId useEffect won't overwrite with stale DB data.
+      if (newConvId) onConversationCreated(newConvId);
     } catch {
       setMessages((prev) => [
         ...prev,
         { role: "assistant", content: "Something went wrong. Please try again." },
       ]);
     } finally {
+      sendingRef.current = false;
       setLoading(false);
     }
   }, [conversationId, loading, onConversationCreated]);
@@ -416,6 +428,9 @@ function formatResponse(res: QueryResponse): string {
     return (res.data as { answer?: string }).answer ?? "";
   }
   if (res.type === "nightlife") {
+    return (res.data as { answer?: string }).answer ?? "";
+  }
+  if (res.type === "explore") {
     return (res.data as { answer?: string }).answer ?? "";
   }
   return "";

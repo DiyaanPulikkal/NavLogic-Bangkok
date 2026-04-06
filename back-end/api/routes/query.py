@@ -60,6 +60,10 @@ async def query(
         stops = ", ".join(result["data"].get("stops", []))
         answer_text = result["data"].get("answer", f"Day plan: {stops}")
         response_data = result
+    elif result["type"] == "explore":
+        stops = ", ".join(result["data"].get("stops", []))
+        answer_text = result["data"].get("answer", f"Explore: {stops}")
+        response_data = result
 
     if answer_text:
         crud.add_message(db, body.conversation_id, "model", answer_text, response_data=response_data)
