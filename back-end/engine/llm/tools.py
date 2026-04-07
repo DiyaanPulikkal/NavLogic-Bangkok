@@ -194,12 +194,14 @@ plan_day = {
     }
 }
 
-plan_day_trip = {
-    "name": "plan_day_trip",
+plan_explore = {
+    "name": "plan_explore",
     "description": (
-        "Plan a day trip in Bangkok with transit directions and attraction recommendations. "
-        "Use this when the user wants to explore Bangkok during the day without specifying exact stops. "
-        "The system automatically discovers the best areas with attractions reachable by transit. "
+        "Plan a trip to explore Bangkok with transit directions and recommendations. "
+        "Use this when the user wants to explore Bangkok without specifying exact stops — "
+        "whether during the day (sightseeing, attractions) or at night (bars, clubs, night markets). "
+        "The system automatically discovers the best areas with attractions and nightlife venues "
+        "reachable by transit, and recommends points of interest appropriate for the time window. "
         "Use plan_day instead when the user specifies exact stops and arrival times."
     ),
     "parameters": {
@@ -212,50 +214,16 @@ plan_day_trip = {
             "start_time": {
                 "type": "string",
                 "description": (
-                    "When the user wants to start the day trip, in HH:MM 24-hour format "
-                    "(e.g. '09:00', '10:00'). Default '09:00' if not specified."
+                    "When the user wants to start, in HH:MM 24-hour format "
+                    "(e.g. '09:00', '19:00'). Default '09:00' if not specified."
                 )
             },
             "end_time": {
                 "type": "string",
                 "description": (
-                    "When the user wants to end the day trip, in HH:MM 24-hour format "
-                    "(e.g. '17:00', '18:00'). Default '17:00' if not specified."
-                )
-            }
-        },
-        "required": ["origin", "start_time", "end_time"]
-    }
-}
-
-plan_nightlife = {
-    "name": "plan_nightlife",
-    "description": (
-        "Plan a nightlife trip in Bangkok with transit directions and venue recommendations. "
-        "Use this when the user wants to go out at night, visit bars, clubs, rooftop bars, "
-        "night markets, or any evening entertainment. "
-        "This finds the best nightlife areas reachable by transit from the user's location "
-        "and builds a multi-stop evening itinerary with venue suggestions."
-    ),
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "origin": {
-                "type": "string",
-                "description": "Where the user is starting from (e.g. hotel location, 'Lat Krabang', 'Siam')."
-            },
-            "start_time": {
-                "type": "string",
-                "description": (
-                    "When the user wants to start the night out, in HH:MM 24-hour format "
-                    "(e.g. '19:00', '20:00'). Default '19:00' if not specified."
-                )
-            },
-            "end_time": {
-                "type": "string",
-                "description": (
-                    "When the user wants the night to end, in HH:MM 24-hour format "
-                    "(e.g. '02:00', '00:00'). Default '02:00' if not specified."
+                    "When the user wants to end, in HH:MM 24-hour format "
+                    "(e.g. '17:00', '02:00'). Can be past midnight for nightlife. "
+                    "Default '17:00' if not specified."
                 )
             }
         },
@@ -272,6 +240,5 @@ FUNCTION_DECLARATIONS = [
     attraction_near_station,
     plan_trip,
     plan_day,
-    plan_day_trip,
-    plan_nightlife,
+    plan_explore,
 ]

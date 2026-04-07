@@ -2,6 +2,19 @@ import logging
 import os
 import re
 from itertools import islice
+
+# Homebrew SWI-Prolog may install libs outside pyswip's default search path.
+# Set LIBSWIPL_PATH and SWI_HOME_DIR so pyswip can locate libswipl.
+if not os.environ.get("LIBSWIPL_PATH") or not os.environ.get("SWI_HOME_DIR"):
+    import glob as _glob
+
+    for _swipl_dir in _glob.glob("/opt/homebrew/Cellar/swi-prolog/*/lib/swipl"):
+        _dylib = os.path.join(_swipl_dir, "lib", "arm64-darwin", "libswipl.dylib")
+        if os.path.isfile(_dylib):
+            os.environ.setdefault("LIBSWIPL_PATH", _dylib)
+            os.environ.setdefault("SWI_HOME_DIR", _swipl_dir)
+            break
+
 from pyswip import Prolog
 
 logger = logging.getLogger("prolog")
