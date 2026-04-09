@@ -24,17 +24,22 @@ interface NightlifeData {
 
 interface Props {
   data: NightlifeData;
+  mode?: "nightlife" | "explore";
 }
 
-export default function NightlifeSteps({ data }: Props) {
+export default function NightlifeSteps({ data, mode = "nightlife" }: Props) {
   const { colors } = useTheme();
+  const isExplore = mode === "explore";
+  const Icon = isExplore ? MapPin : Moon;
+  const label = isExplore ? "Explore plan" : "Nightlife plan";
+  const venueLabel = isExplore ? "Near" : "Venues near";
 
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <Moon size={14} className="text-[#e87722]" />
+        <Icon size={14} className="text-[#e87722]" />
         <span className={`text-[11px] font-medium ${colors.textMuted} uppercase tracking-wider`}>
-          Nightlife plan from {data.origin}
+          {label} from {data.origin}
         </span>
         <span className={`text-[11px] ${colors.textMuted} ml-auto tabular-nums`}>
           {data.start_time} — {data.end_time}
@@ -84,7 +89,7 @@ export default function NightlifeSteps({ data }: Props) {
           {leg.attractions.length > 0 && (
             <div>
               <div className={`text-[11px] font-medium ${colors.textMuted} mb-2 uppercase tracking-wider`}>
-                Venues near {leg.to}
+                {venueLabel} {leg.to}
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {leg.attractions.map((venue) => (

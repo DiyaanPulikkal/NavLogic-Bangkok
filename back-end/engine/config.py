@@ -1,6 +1,6 @@
 import logging
 
-MODEL = "gemini-3-flash-preview"
+MODEL = "gemini-2.5-flash-lite"
 
 
 def setup_logging(level=logging.INFO):

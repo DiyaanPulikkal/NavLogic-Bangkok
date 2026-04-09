@@ -100,5 +100,10 @@ export interface NightlifeResponse {
   data: NightlifeData;
 }
 
+export interface ExploreResponse {
+  type: "explore";
+  data: NightlifeData;
+}
+
 export type ApiRouteResult = RouteResponse | ErrorResponse;
-export type ApiResult = RouteResponse | ScheduleResponse | DayPlanResponse | NightlifeResponse | ErrorResponse | { type: "answer"; data: { answer: string } };
+export type ApiResult = RouteResponse | ScheduleResponse | DayPlanResponse | NightlifeResponse | ExploreResponse | ErrorResponse | { type: "answer"; data: { answer: string } };

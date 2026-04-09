@@ -253,6 +253,8 @@ export default function HomePage({ conversationId, onConversationCreated }: Home
                         <ScheduleResult data={msg.response.data as unknown as ScheduleData} />
                       ) : msg.role === "assistant" && msg.response?.type === "day_plan" ? (
                         <DayPlanResult data={msg.response.data as unknown as DayPlanData} />
+                      ) : msg.role === "assistant" && msg.response?.type === "explore" ? (
+                        <ExploreResult data={msg.response.data as unknown as NightlifeData} />
                       ) : msg.role === "assistant" && msg.response?.type === "nightlife" ? (
                         <NightlifeResult data={msg.response.data as unknown as NightlifeData} />
                       ) : msg.role === "assistant" ? (
@@ -396,6 +398,20 @@ function DayPlanResult({ data }: { data: DayPlanData }) {
       {data.legs && data.legs.length > 0 && (
         <DayPlanSteps legs={data.legs} origin={data.origin} />
       )}
+    </div>
+  );
+}
+
+function ExploreResult({ data }: { data: NightlifeData }) {
+  const { colors } = useTheme();
+  return (
+    <div>
+      {data.answer && (
+        <div className={`prose-chat text-sm ${colors.text} mb-3 leading-relaxed`}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{data.answer}</ReactMarkdown>
+        </div>
+      )}
+      <NightlifeSteps data={data} mode="explore" />
     </div>
   );
 }

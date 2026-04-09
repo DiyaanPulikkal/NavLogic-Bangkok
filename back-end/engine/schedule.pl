@@ -304,7 +304,7 @@ first_departure([leg(_, _, _, Dep, _) | _], Dep).
 --------------------------------------------------
    FORMATTING HELPERS
 --------------------------------------------------
-/*
+*/
 format_time(HHMM, Formatted) :-
     Hours is HHMM // 100,
     Minutes is HHMM mod 100,
