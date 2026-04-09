@@ -1,31 +1,17 @@
 /*
-==========================================================
-Schedule and Trip Planning — First-Order Logic Demonstration
-==========================================================
-
-This module demonstrates:
-  1. FOL Facts (Knowledge Base)  — transit/5 ground facts
-  2. Horn Clauses / CNF Rules    — recursive plan_trip/4
-  3. Unification (MGU)           — Prolog unifies user variables with facts
-  4. Proof by Resolution         — SLD resolution proves valid itineraries
-
-Predicate signatures:
-  transit(Origin, Destination, Line, Depart, Arrive).
-    — A single scheduled service. Times are integers in HHMM format.
-
-  plan_trip(Origin, Destination, Deadline, Itinerary).
-    — Proves a valid itinerary from Origin to Destination
-      arriving no later than Deadline.
-
-  Itinerary is a list of leg(Origin, Dest, Line, Depart, Arrive) terms.
+--------------------------------------------------
+Schedule and Trip Planning: First-Order Logic
+--------------------------------------------------
 */
 
 :- discontiguous transit/5.
+:- use_module(library(time)).
 
-/* --------------------------------------------------
-   FOL FACTS — Ground atoms of the transit schedule
-   Each fact: transit(From, To, Line, Depart, Arrive)
-   -------------------------------------------------- */
+/*
+--------------------------------------------------
+   FOL FACTS: transit(From, To, Line, Depart, Arrive)
+--------------------------------------------------
+*/
 
 % === BTS Sukhumvit Line (morning services) ===
 transit('Mo Chit (N8)', 'Saphan Khwai (N7)', bts_sukhumvit, 0700, 0702).
@@ -118,7 +104,6 @@ transit('Ratchaprarop (A7)', 'Makkasan (A6)', airport_rail_link, 0736, 0741).
 transit('Makkasan (A6)', 'Ramkhamhaeng (A5)', airport_rail_link, 0742, 0747).
 
 % === Inter-line transfer connections (walking between stations) ===
-% These represent walking transfers with ~5 min transfer time.
 transit('Asok (E4)', 'Sukhumvit (BL22)', transfer_walk, 0700, 0705).
 transit('Asok (E4)', 'Sukhumvit (BL22)', transfer_walk, 0730, 0735).
 transit('Asok (E4)', 'Sukhumvit (BL22)', transfer_walk, 0800, 0805).
@@ -140,13 +125,6 @@ transit('Mo Chit (N8)', 'Chatuchak Park (BL13)', transfer_walk, 0650, 0700).
 transit('Mo Chit (N8)', 'Chatuchak Park (BL13)', transfer_walk, 0710, 0720).
 transit('Chatuchak Park (BL13)', 'Mo Chit (N8)', transfer_walk, 0650, 0700).
 transit('Chatuchak Park (BL13)', 'Mo Chit (N8)', transfer_walk, 0710, 0720).
-
-
-/* --------------------------------------------------
-   EVENING / NIGHT SERVICES
-   Extends the schedule to cover 18:45–23:00 for
-   nightlife and late-evening trip planning.
-   -------------------------------------------------- */
 
 % === Airport Rail Link — Inbound evening (Lat Krabang → Phaya Thai) ===
 transit('Lat Krabang (A2)', 'Ban Thap Chang (A3)', airport_rail_link, 1845, 1850).
@@ -289,96 +267,49 @@ transit('Silom (BL26)', 'Sala Daeng (S2)', transfer_walk, 2130, 2135).
 transit('Siam (CEN)', 'Ratchadamri (S1)', transfer_walk, 2115, 2120).
 
 
-/* --------------------------------------------------
-   LOGICAL RULES — Horn Clauses for Trip Planning
-   --------------------------------------------------
-
-   These rules form the core of the resolution-based
-   proof system. Prolog's SLD resolution engine attempts
-   to prove plan_trip/4 by unifying variables with facts
-   and recursively resolving subgoals.
-
-   Horn clause form (CNF with at most one positive literal):
-     plan_trip(A, B, D, I) :- <body>.
-   Equivalent to:
-     ¬body ∨ plan_trip(A, B, D, I)
-   -------------------------------------------------- */
-
 /*
-  Public entry point — initialises the visited-station list
-  to prevent infinite cycles (e.g. Asok ↔ Sukhumvit walk loop).
+--------------------------------------------------
+LOGICAL RULES: Horn Clauses for Trip Planning
+--------------------------------------------------
 */
+
+
+% Public entry point
 plan_trip(Origin, Destination, Deadline, Itinerary) :-
-    plan_trip(Origin, Destination, Deadline, [Origin], Itinerary).
+    plan_trip(Origin, Destination, Deadline, [Origin], 25, Itinerary).
 
-/*
-  Base case (direct trip):
-  ∀ A,B,Line,Dep,Arr,Deadline:
-    transit(A, B, Line, Dep, Arr) ∧ Arr ≤ Deadline
-    → plan_trip(A, B, Deadline, [leg(A, B, Line, Dep, Arr)])
 
-  The Prolog engine UNIFIES A, B, Line, Dep, Arr with
-  matching transit/5 facts (Most General Unifier).
-*/
-plan_trip(Origin, Destination, Deadline, _Visited, [leg(Origin, Destination, Line, Depart, Arrive)]) :-
+% Base case (direct trip):
+plan_trip(Origin, Destination, Deadline, _Visited, MaxLegs, [leg(Origin, Destination, Line, Depart, Arrive)]) :-
+    MaxLegs > 0,
     transit(Origin, Destination, Line, Depart, Arrive),
     Arrive =< Deadline.
 
-/*
-  Recursive case (multi-leg trip via intermediate station):
-  ∀ A,B,C,Line,Dep,Arr,Deadline,RestItinerary:
-    transit(A, B, Line, Dep, Arr) ∧
-    Arr =< Deadline ∧
-    B ∉ Visited ∧
-    plan_trip(B, C, Deadline, [B|Visited], RestItinerary) ∧
-    first_departure(RestItinerary, NextDep) ∧
-    Arr =< NextDep
-    → plan_trip(A, C, Deadline, Visited, [leg(A, B, Line, Dep, Arr) | RestItinerary])
-
-  RESOLUTION: Prolog resolves the recursive plan_trip
-  subgoal against both the base case and this rule,
-  building the proof tree until Destination is reached
-  or all branches are exhausted (proof by refutation).
-
-  CONNECTION CONSTRAINT: You cannot board the next leg
-  before arriving at the intermediate station (Arr =< NextDep).
-
-  CYCLE PREVENTION: The Visited list ensures no station
-  is visited twice, eliminating infinite loops.
-*/
-plan_trip(Origin, Destination, Deadline, Visited, [leg(Origin, Mid, Line, Depart, Arrive) | RestLegs]) :-
+% Recursive case (multi-leg trip via intermediate station):
+plan_trip(Origin, Destination, Deadline, Visited, MaxLegs, [leg(Origin, Mid, Line, Depart, Arrive) | RestLegs]) :-
+    MaxLegs > 1,
     transit(Origin, Mid, Line, Depart, Arrive),
     Mid \= Destination,
     \+ member(Mid, Visited),
     Arrive =< Deadline,
-    plan_trip(Mid, Destination, Deadline, [Mid | Visited], RestLegs),
+    NewMax is MaxLegs - 1,
+    plan_trip(Mid, Destination, Deadline, [Mid | Visited], NewMax, RestLegs),
     first_departure(RestLegs, NextDepart),
     Arrive =< NextDepart.
 
-/*
-  Helper: extract departure time of the first leg in an itinerary.
-  Used to enforce the connection constraint.
-*/
+% Helper: extract departure time of the first leg in an itinerary. Used to enforce the connection constraint.
 first_departure([leg(_, _, _, Dep, _) | _], Dep).
 
-
-/* --------------------------------------------------
-   FORMATTING HELPERS
-   -------------------------------------------------- */
-
 /*
-  format_time(+HHMM, -Formatted)
-  Convert integer HHMM to 'HH:MM' atom for display.
-*/
+--------------------------------------------------
+   FORMATTING HELPERS
+--------------------------------------------------
+/*
 format_time(HHMM, Formatted) :-
     Hours is HHMM // 100,
     Minutes is HHMM mod 100,
     format(atom(Formatted), '~|~`0t~d~2+:~|~`0t~d~2+', [Hours, Minutes]).
 
-/*
-  format_itinerary(+Itinerary, -FormattedLegs)
-  Convert leg terms to formatted dicts for JSON serialization.
-*/
 format_itinerary([], []).
 format_itinerary([leg(From, To, Line, Dep, Arr) | Rest], [Formatted | FormattedRest]) :-
     format_time(Dep, DepStr),

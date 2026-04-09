@@ -50,12 +50,8 @@ shared_line(StationA, StationB, Line) :-
 
 /*
 --------------------------------------------------
-Route Steps — ride segments and transfers
+Route Steps: Takes an ordered path (list of station names) and produces a list of step term
 --------------------------------------------------
-Takes an ordered path (list of station names) and
-produces a list of step terms:
-  ride(Line, BoardStation, AlightStation, Stations)
-  transfer(FromStation, ToStation)
 */
 
 % Base case: single station or empty — no steps.
@@ -70,7 +66,6 @@ route_steps([A, B | Rest], Steps) :-
         route_steps([B | Rest], RestSteps)
     ).
 
-% extend_ride(+Line, +Board, +AccStations, +Remaining, -Steps)
 % Greedily extends a ride on Line, accumulating stations visited.
 extend_ride(Line, Board, Acc, [Last], [ride(DisplayLine, Board, Last, Acc)]) :-
     line_display_name(Line, DisplayLine).
@@ -85,11 +80,8 @@ extend_ride(Line, Board, Acc, [C, D | Rest], Steps) :-
 
 /*
 --------------------------------------------------
-Suggest Transfer Station
+Suggest Transfer Station: Given two line identifiers, find interchange stations that connect them
 --------------------------------------------------
-Given two line identifiers, find interchange stations
-that connect them. Uses is_transfer_station/1 from
-knowledge_base.pl plus station/2 facts.
 */
 
 suggest_transfer_station(LineA, LineB, TransferStation) :-
@@ -97,9 +89,7 @@ suggest_transfer_station(LineA, LineB, TransferStation) :-
     station(TransferStation, LineA),
     station(TransferStation, LineB).
 
-% Also find indirect transfers: walk from StationA on LineA
-% to StationB on LineB where they are connected by an
-% inter-line connection (connects/3 with weight 10).
+% Also find indirect transfers: walk from StationA on LineA to StationB on LineB where they are connected by an inter-line connection (connects/3 with weight 10).
 suggest_transfer_station(LineA, LineB, transfer_pair(StationA, StationB)) :-
     LineA \= LineB,
     station(StationA, LineA),

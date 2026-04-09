@@ -234,20 +234,10 @@ class Orchestrator:
         if end_time is None:
             return {"type": "error", "data": {"message": f"Invalid time format: '{end_time_str}'."}}, history
 
-        # --- Prolog KB: get both attractions and nightlife venues grouped by station ---
+        # --- Prolog KB: get all attractions (including nightlife) grouped by station ---
         attractions_by_station = self.prolog.get_attractions_by_station()
-        nightlife_by_station = self.prolog.get_nightlife_venues()
 
-        # Merge into a unified points-of-interest map per station
-        poi_by_station: dict[str, dict] = {}
-        for station, attractions in attractions_by_station.items():
-            poi_by_station.setdefault(station, {"attractions": [], "nightlife": []})
-            poi_by_station[station]["attractions"] = attractions
-        for station, venues in nightlife_by_station.items():
-            poi_by_station.setdefault(station, {"attractions": [], "nightlife": []})
-            poi_by_station[station]["nightlife"] = [v['name'] for v in venues]
-
-        if not poi_by_station:
+        if not attractions_by_station:
             return {"type": "answer", "data": {"answer": "No points of interest found in the knowledge base."}}, history
 
         # --- Python Dijkstra: find reachable areas ---
@@ -255,14 +245,13 @@ class Orchestrator:
         graph = self._build_graph(edges)
 
         reachable = []
-        for station, poi in poi_by_station.items():
+        for station, attractions in attractions_by_station.items():
             path, cost = self._dijkstra(graph, origin, station)
             if path is not None:
-                all_names = poi["attractions"] + poi["nightlife"]
                 reachable.append({
                     "station": station,
                     "cost": cost,
-                    "attractions": all_names,
+                    "attractions": attractions,
                     "path": path,
                 })
 

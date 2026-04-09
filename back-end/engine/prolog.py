@@ -22,6 +22,8 @@ logger = logging.getLogger("prolog")
 KB_PATH = os.path.join(os.path.dirname(__file__), "knowledge_base.pl")
 SCHEDULE_PATH = os.path.join(os.path.dirname(__file__), "schedule.pl")
 
+SCHEDULE_QUERY_TIMEOUT = 10  # seconds — prevents runaway Prolog searches
+
 
 class PrologInterface:
     def __init__(self):
@@ -239,8 +241,11 @@ class PrologInterface:
             List of itineraries, each a list of leg dicts.
         """
         query = (
-            f"plan_trip('{origin}', '{destination}', {deadline}, Itinerary), "
-            f"format_itinerary(Itinerary, Formatted)"
+            f"catch("
+            f"call_with_time_limit({SCHEDULE_QUERY_TIMEOUT}, "
+            f"(plan_trip('{origin}', '{destination}', {deadline}, Itinerary), "
+            f"format_itinerary(Itinerary, Formatted))"
+            f"), time_limit_exceeded, fail)"
         )
         logger.info("Executing schedule query: %s", query)
         # Limit raw results to avoid combinatorial explosion on large schedules
