@@ -11,7 +11,6 @@ from api.routes.route import router as route_router
 from api.routes.stations import router as stations_router
 from api.routes.auth import router as auth_router
 from api.routes.conversations import router as conversations_router
-from api.routes.schedule import router as schedule_router
 
 
 @asynccontextmanager
@@ -41,4 +40,3 @@ app.include_router(conversations_router, prefix="/api")
 app.include_router(query_router, prefix="/api")
 app.include_router(route_router, prefix="/api")
 app.include_router(stations_router, prefix="/api")
-app.include_router(schedule_router, prefix="/api")

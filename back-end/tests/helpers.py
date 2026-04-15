@@ -1,41 +1,78 @@
+"""
+tests/helpers.py — test-only fixtures wiring the orchestrator without the LLM.
+
+Keeps integration tests LLM-free (no network, no API key needed) by
+swapping in StubLLM for real Gemini calls. Two public constructors:
+
+  OrchestratorNoLLM()          — fully-constructed orchestrator, llm=None.
+                                 Use for direct unit tests of internals.
+  make_orchestrator_with_llm_result(result, answer=None)
+                               — orchestrator whose translate_to_query
+                                 returns `result` and whose format_result
+                                 fills data.answer with `answer`.
+
+Also exported:
+  StubLLM      — conforms to the new LLMInterface contract (4-arg signature).
+  make_plan_stub(origin, goal, answer=None)
+               — shorthand: returns a StubLLM emitting plan(origin=..., goal=...).
+  build_graph_and_weights(edges) — shared adjacency-dict builder for exhaustive
+                                   route tests.
+"""
+
 from engine.orchestrator import Orchestrator
 from engine.prolog import PrologInterface
 
 
 class OrchestratorNoLLM(Orchestrator):
+    """Orchestrator with llm=None; Prolog loaded from the real KB."""
+
     def __init__(self):
         self.llm = None
         self.prolog = PrologInterface()
-        self._station_lines_cache = None
-        self._all_stations_cache = None
+        self._vocab_cache = None
+        self._synonyms_cache = None
 
 
 class StubLLM:
-    """Stub that returns a pre-configured result from translate_to_query."""
+    """Stub LLM matching the new `LLMInterface` surface.
 
-    def __init__(self, result):
+    `translate_to_query` returns the pre-configured result; `format_result`
+    injects `answer_text` into `data.answer` so the orchestrator's
+    `_format` step is covered without hitting Gemini.
+    """
+
+    def __init__(self, result, answer_text: str | None = None):
         self._result = result
+        self._answer_text = answer_text
 
-    def translate_to_query(self, user_input, history=None):
+    def translate_to_query(self, user_input, history=None, vocab=None, synonyms=None):
         if history is None:
             history = []
         return self._result, history
 
-    def format_prolog_result(self, function_name, result, history=None):
+    def format_result(self, result, history=None, vocab=None, synonyms=None):
         if history is None:
             history = []
+        result.setdefault("data", {})["answer"] = self._answer_text
         return result, history
 
 
-def make_orchestrator_with_llm_result(result):
+def make_orchestrator_with_llm_result(result, answer_text: str | None = None):
+    """Build a fully-wired OrchestratorNoLLM whose LLM is the given stub."""
     orchestrator = OrchestratorNoLLM()
-    orchestrator.llm = StubLLM(result)
+    orchestrator.llm = StubLLM(result, answer_text)
     return orchestrator
 
 
+def make_plan_stub(origin: str, goal: dict, answer_text: str | None = None):
+    """Shorthand: stub LLM that emits `plan(origin=..., goal=...)`."""
+    return StubLLM(("plan", {"origin": origin, "goal": goal}), answer_text)
+
+
 def build_graph_and_weights(edges):
-    graph = {}
-    weights = {}
+    """Turn a list of (a, b, t) edges into (graph_dict, weights_dict)."""
+    graph: dict[str, list[tuple[str, int]]] = {}
+    weights: dict[tuple[str, str], int] = {}
     for a, b, t in edges:
         graph.setdefault(a, []).append((b, t))
         weights[(a, b)] = t

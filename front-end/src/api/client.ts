@@ -1,4 +1,9 @@
-import type { StationInfo, AttractionInfo, ApiRouteResult, ScheduleData } from "../types";
+import type {
+  StationInfo,
+  AttractionInfo,
+  ApiRouteResult,
+  QueryResponse,
+} from "../types";
 
 const BASE = "/api";
 
@@ -25,29 +30,15 @@ export async function fetchRoute(
 ): Promise<ApiRouteResult> {
   const params = new URLSearchParams({ start, end });
   const res = await fetch(`${BASE}/route?${params}`);
+  if (res.status === 404) {
+    const body = await res.json().catch(() => ({ detail: "Not found" }));
+    return {
+      type: "error",
+      data: { message: body.detail ?? "Not found" },
+    };
+  }
   if (!res.ok) throw new Error("Failed to fetch route");
   return res.json();
-}
-
-export interface ScheduleResult {
-  type: "schedule";
-  data: ScheduleData;
-}
-
-export async function fetchSchedule(
-  origin: string,
-  destination: string,
-  deadline: string = "09:00"
-): Promise<ScheduleResult | { type: "error"; data: { message: string } }> {
-  const params = new URLSearchParams({ origin, destination, deadline });
-  const res = await fetch(`${BASE}/schedule?${params}`);
-  if (!res.ok) throw new Error("Failed to fetch schedule");
-  return res.json();
-}
-
-export interface QueryResponse {
-  type: "route" | "answer" | "error" | "schedule" | "day_plan" | "nightlife" | "explore";
-  data: Record<string, unknown>;
 }
 
 export async function postQuery(
@@ -93,7 +84,13 @@ export async function createConversation(
 }
 
 export interface ConversationDetail extends ConversationInfo {
-  messages: { id: number; role: string; content: string; response_data: QueryResponse | null; created_at: string }[];
+  messages: {
+    id: number;
+    role: string;
+    content: string;
+    response_data: QueryResponse | null;
+    created_at: string;
+  }[];
 }
 
 export async function getConversation(id: number): Promise<ConversationDetail> {

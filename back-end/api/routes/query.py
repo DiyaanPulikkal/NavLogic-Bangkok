@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Request, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from google.genai import types
 from sqlalchemy.orm import Session
 
 from api.schemas import QueryRequest
 from auth.dependencies import get_current_user
-from db.database import get_db
 from db import crud
+from db.database import get_db
 from db.models import User
 
 router = APIRouter()
@@ -22,6 +22,31 @@ def _rebuild_history(messages) -> list:
     return history
 
 
+def _extract_answer_and_blob(result: dict) -> tuple[str, dict | None]:
+    """Return (text_to_persist_as_content, structured_response_data).
+
+    The engine returns one of three envelope types:
+      - "plan":   data has an `answer` (LLM narration) + structured fields.
+      - "answer": data has an `answer` (plain text response).
+      - "error":  data has a `message`.
+
+    For `plan`, we persist the narration as the message content so the
+    frontend can render it as markdown fallback if it doesn't understand
+    the structured view, and keep the full result as `response_data` for
+    rich rendering.
+    """
+    rtype = result.get("type")
+    data = result.get("data", {}) or {}
+    if rtype == "error":
+        return data.get("message", ""), None
+    if rtype == "answer":
+        return data.get("answer", "") or "", None
+    if rtype == "plan":
+        narration = data.get("answer") or ""
+        return narration, result
+    return "", None
+
+
 @router.post("/query")
 async def query(
     body: QueryRequest,
@@ -35,39 +60,22 @@ async def query(
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # Load existing messages and rebuild history
     db_messages = crud.get_messages_for_conversation(db, body.conversation_id)
     history = _rebuild_history(db_messages)
 
     result, _ = orchestrator.handle(body.message, history)
 
-    # Persist user message and assistant response
     crud.add_message(db, body.conversation_id, "user", body.message)
 
-    answer_text = ""
-    response_data = None
-    if result["type"] == "answer":
-        answer_text = result["data"].get("answer", "")
-    elif result["type"] == "error":
-        answer_text = result["data"].get("message", "")
-    elif result["type"] == "route":
-        answer_text = f"Route from {result['data'].get('from', '')} to {result['data'].get('to', '')}"
-        response_data = result
-    elif result["type"] == "schedule":
-        answer_text = result["data"].get("answer", f"Schedule from {result['data'].get('origin', '')} to {result['data'].get('destination', '')}")
-        response_data = result
-    elif result["type"] == "day_plan":
-        stops = ", ".join(result["data"].get("stops", []))
-        answer_text = result["data"].get("answer", f"Day plan: {stops}")
-        response_data = result
-    elif result["type"] == "explore":
-        stops = ", ".join(result["data"].get("stops", []))
-        answer_text = result["data"].get("answer", f"Explore: {stops}")
-        response_data = result
-
-    if answer_text:
-        crud.add_message(db, body.conversation_id, "model", answer_text, response_data=response_data)
+    answer_text, response_data = _extract_answer_and_blob(result)
+    if answer_text or response_data:
+        crud.add_message(
+            db,
+            body.conversation_id,
+            "model",
+            answer_text,
+            response_data=response_data,
+        )
 
     crud.touch_conversation(db, body.conversation_id)
-
     return result

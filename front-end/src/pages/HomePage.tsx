@@ -7,8 +7,8 @@ import {
   Landmark,
   Map,
   ArrowLeftRight,
-  Clock,
-  ClipboardList,
+  Sparkles,
+  Sun,
   Loader2,
   type LucideIcon,
 } from "lucide-react";
@@ -16,14 +16,10 @@ import {
   postQuery,
   createConversation,
   getConversation,
-  type QueryResponse,
 } from "../api/client";
+import type { QueryResponse, PlanData } from "../types";
 import { useTheme } from "../context/ThemeContext";
-import RouteSteps from "../components/RouteSteps";
-import ScheduleSteps from "../components/ScheduleSteps";
-import DayPlanSteps from "../components/DayPlanSteps";
-import NightlifeSteps from "../components/NightlifeSteps";
-import type { RouteData, RouteStep, ScheduleData, DayPlanData, NightlifeData } from "../types";
+import PlanResult from "../components/PlanResult";
 
 interface Message {
   role: "user" | "assistant";
@@ -33,11 +29,11 @@ interface Message {
 
 const suggestions: { icon: LucideIcon; text: string; category: string }[] = [
   { icon: TrainFront, text: "Siam to Chatuchak", category: "route" },
-  { icon: Landmark, text: "What's near Grand Palace?", category: "explore" },
-  { icon: Map, text: "What line is Mo Chit on?", category: "info" },
+  { icon: Landmark, text: "Temple from Siam, avoiding the heat", category: "themed" },
+  { icon: Sun, text: "Somewhere cheap, quiet, and indoor near Asok", category: "themed" },
   { icon: ArrowLeftRight, text: "Asok to Siam", category: "route" },
-  { icon: Clock, text: "I need to get from Mo Chit to Asok by 8am", category: "schedule" },
-  { icon: ClipboardList, text: "Plan my day: Mo Chit to Siam by 8am, then Asok by 10am — what to visit?", category: "plan" },
+  { icon: Map, text: "What line is Mo Chit on?", category: "info" },
+  { icon: Sparkles, text: "Show me something aesthetic near Siam", category: "themed" },
 ];
 
 interface HomePageProps {
@@ -55,7 +51,8 @@ export default function HomePage({ conversationId, onConversationCreated }: Home
 
   const hasMessages = messages.length > 0 || loading;
 
-  // Load messages when conversationId changes (skip if a send is in-flight)
+  const sendingRef = useRef(false);
+
   useEffect(() => {
     if (!conversationId) {
       setMessages([]);
@@ -84,10 +81,6 @@ export default function HomePage({ conversationId, onConversationCreated }: Home
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
-  // Track whether sendMessage is in-flight so the conversationId
-  // useEffect doesn't clobber local messages with a stale DB fetch.
-  const sendingRef = useRef(false);
-
   const sendMessage = useCallback(async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || loading) return;
@@ -101,7 +94,6 @@ export default function HomePage({ conversationId, onConversationCreated }: Home
       let activeConvId = conversationId;
       let newConvId: number | null = null;
 
-      // Auto-create conversation on first message
       if (!activeConvId) {
         const conv = await createConversation(trimmed.slice(0, 60));
         activeConvId = conv.id;
@@ -111,13 +103,11 @@ export default function HomePage({ conversationId, onConversationCreated }: Home
       const res = await postQuery(trimmed, activeConvId);
       const assistantMsg: Message = {
         role: "assistant",
-        content: formatResponse(res),
+        content: extractText(res),
         response: res,
       };
       setMessages((prev) => [...prev, assistantMsg]);
 
-      // Notify parent only after the response is in local state,
-      // so the conversationId useEffect won't overwrite with stale DB data.
       if (newConvId) onConversationCreated(newConvId);
     } catch {
       setMessages((prev) => [
@@ -137,7 +127,6 @@ export default function HomePage({ conversationId, onConversationCreated }: Home
 
   return (
     <div className={`h-screen flex flex-col ${colors.bg} overflow-hidden`}>
-      {/* Empty state — welcome */}
       {!hasMessages && (
         <div className="flex-1 flex flex-col items-center justify-center px-4">
           <motion.div
@@ -155,7 +144,7 @@ export default function HomePage({ conversationId, onConversationCreated }: Home
               NavLogic - Bangkok
             </h1>
             <p className={`text-sm ${colors.textMuted} mt-1.5`}>
-              Routes, schedules, and day plans across BTS, MRT & more
+              Ask about routes, tagged places, or whatever you feel like
             </p>
           </motion.div>
 
@@ -226,7 +215,6 @@ export default function HomePage({ conversationId, onConversationCreated }: Home
         </div>
       )}
 
-      {/* Chat mode */}
       {hasMessages && (
         <>
           <div className="flex-1 overflow-y-auto">
@@ -247,16 +235,8 @@ export default function HomePage({ conversationId, onConversationCreated }: Home
                           : `${colors.assistantBubble} border ${colors.assistantBubbleBorder} ${colors.assistantBubbleText}`
                       }`}
                     >
-                      {msg.role === "assistant" && msg.response?.type === "route" ? (
-                        <RouteResult data={msg.response.data as unknown as RouteData} />
-                      ) : msg.role === "assistant" && msg.response?.type === "schedule" ? (
-                        <ScheduleResult data={msg.response.data as unknown as ScheduleData} />
-                      ) : msg.role === "assistant" && msg.response?.type === "day_plan" ? (
-                        <DayPlanResult data={msg.response.data as unknown as DayPlanData} />
-                      ) : msg.role === "assistant" && msg.response?.type === "explore" ? (
-                        <ExploreResult data={msg.response.data as unknown as NightlifeData} />
-                      ) : msg.role === "assistant" && msg.response?.type === "nightlife" ? (
-                        <NightlifeResult data={msg.response.data as unknown as NightlifeData} />
+                      {msg.role === "assistant" && msg.response?.type === "plan" ? (
+                        <PlanResult data={msg.response.data as PlanData} />
                       ) : msg.role === "assistant" ? (
                         <div className="prose-chat text-sm leading-relaxed">
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
@@ -275,7 +255,6 @@ export default function HomePage({ conversationId, onConversationCreated }: Home
             </div>
           </div>
 
-          {/* Chat input */}
           <div className={`px-4 pb-4 pt-2 ${theme === "dark" ? "bg-gradient-to-t from-[#191919] via-[#191919] to-transparent" : "bg-gradient-to-t from-[#f8f7f4] via-[#f8f7f4] to-transparent"}`}>
             <form onSubmit={handleSubmit} className="max-w-2xl mx-auto">
               <div className={`${colors.inputBg} rounded-2xl border ${colors.inputBorder} overflow-hidden transition-shadow
@@ -319,13 +298,13 @@ export default function HomePage({ conversationId, onConversationCreated }: Home
 const loadingPhrases = [
   "Checking the map...",
   "Finding the best route...",
-  "Consulting the timetable...",
+  "Relaxing constraints...",
   "Navigating Bangkok traffic...",
   "Calculating transfers...",
-  "Asking the station master...",
+  "Auditing the route...",
   "Scanning transit lines...",
   "Optimizing your journey...",
-  "Crunching the schedule...",
+  "Consulting the rulebook...",
   "Almost there...",
 ];
 
@@ -350,104 +329,9 @@ function LoadingIndicator() {
   );
 }
 
-function RouteResult({ data }: { data: RouteData }) {
-  const { colors } = useTheme();
-  return (
-    <div>
-      <div className={`flex items-baseline gap-2 mb-1`}>
-        <p className={`text-sm font-semibold ${colors.text}`}>
-          {data.from} → {data.to}
-        </p>
-        <span className={`text-xs ${colors.textMuted}`}>~{data.total_time} min</span>
-      </div>
-      <RouteSteps steps={data.steps as RouteStep[]} />
-    </div>
-  );
-}
-
-function ScheduleResult({ data }: { data: ScheduleData }) {
-  const { colors } = useTheme();
-  return (
-    <div>
-      {data.answer && (
-        <div className={`prose-chat text-sm ${colors.text} mb-3 leading-relaxed`}>
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{data.answer}</ReactMarkdown>
-        </div>
-      )}
-      {data.itineraries && data.itineraries.length > 0 && (
-        <ScheduleSteps
-          itineraries={data.itineraries}
-          origin={data.origin}
-          destination={data.destination}
-          deadline={data.deadline}
-        />
-      )}
-    </div>
-  );
-}
-
-function DayPlanResult({ data }: { data: DayPlanData }) {
-  const { colors } = useTheme();
-  return (
-    <div>
-      {data.answer && (
-        <div className={`prose-chat text-sm ${colors.text} mb-3 leading-relaxed`}>
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{data.answer}</ReactMarkdown>
-        </div>
-      )}
-      {data.legs && data.legs.length > 0 && (
-        <DayPlanSteps legs={data.legs} origin={data.origin} />
-      )}
-    </div>
-  );
-}
-
-function ExploreResult({ data }: { data: NightlifeData }) {
-  const { colors } = useTheme();
-  return (
-    <div>
-      {data.answer && (
-        <div className={`prose-chat text-sm ${colors.text} mb-3 leading-relaxed`}>
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{data.answer}</ReactMarkdown>
-        </div>
-      )}
-      <NightlifeSteps data={data} mode="explore" />
-    </div>
-  );
-}
-
-function NightlifeResult({ data }: { data: NightlifeData }) {
-  const { colors } = useTheme();
-  return (
-    <div>
-      {data.answer && (
-        <div className={`prose-chat text-sm ${colors.text} mb-3 leading-relaxed`}>
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{data.answer}</ReactMarkdown>
-        </div>
-      )}
-      <NightlifeSteps data={data} />
-    </div>
-  );
-}
-
-function formatResponse(res: QueryResponse): string {
-  if (res.type === "error") {
-    return (res.data as { message: string }).message;
-  }
-  if (res.type === "answer") {
-    return (res.data as { answer: string }).answer;
-  }
-  if (res.type === "schedule") {
-    return (res.data as { answer?: string }).answer ?? "";
-  }
-  if (res.type === "day_plan") {
-    return (res.data as { answer?: string }).answer ?? "";
-  }
-  if (res.type === "nightlife") {
-    return (res.data as { answer?: string }).answer ?? "";
-  }
-  if (res.type === "explore") {
-    return (res.data as { answer?: string }).answer ?? "";
-  }
+function extractText(res: QueryResponse): string {
+  if (res.type === "error") return res.data.message;
+  if (res.type === "answer") return res.data.answer;
+  if (res.type === "plan") return res.data.answer ?? "";
   return "";
 }

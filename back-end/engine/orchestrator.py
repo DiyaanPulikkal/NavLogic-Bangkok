@@ -1,487 +1,396 @@
+"""
+orchestrator.py — the neuro-symbolic loop.
+
+handle() routes one user input through the engine:
+
+  user_input
+    │
+    ▼
+  LLM.translate_to_query(user_input, history, vocab, synonyms)
+    │  → ("plan", {origin, goal})
+    ▼
+  _handle_plan(args, history):
+      0. resolve origin (Prolog match_station + Python rank + edit-dist)
+      1. pure-route shortcut: goal is just route_to → Dijkstra + route_steps
+      2. unknown_tags pre-flight → if anything, surface back to the user
+      3. candidates(goal)
+      4. empty? relax(goal) → minimal-drop survivors with relaxation_note
+      5. Dijkstra cost from origin to each candidate's station
+      6. rank: pref_score↓ then cost↑
+      7. audit_route_for_path(path, goal) per candidate
+         violation? blacklist this POI, try next-best (max MAX_REPLAN sweeps)
+      8. format result + audit_trail through LLM for natural-language reply
+
+The audit loop is the showpiece: Prolog supervises Python's numeric search
+and tells it when to back off. Prolog never does Dijkstra; Python never
+does logical-form evaluation. The shape of the result includes both
+relaxation_note and audit_trail so the LLM can narrate "what I tried,
+what I dropped, what I rejected" — failure modes are first-class.
+"""
+
+from __future__ import annotations
+
 import heapq
 import logging
 from difflib import SequenceMatcher
 
 from engine.llm.llm import LLMInterface
-from engine.prolog import PrologInterface
+from engine.prolog import GoalShapeError, PrologInterface
 
 logger = logging.getLogger("orchestrator")
 
 
-# Prolog query builders for each knowledge-base function
-PROLOG_QUERY_MAP = {
-    'line_of':               lambda args: f"line_of('{args['station_name']}', Line).",
-    'same_line':             lambda args: f"same_line('{args['station_a']}', '{args['station_b']}').",
-    'is_transfer_station':   lambda args: f"is_transfer_station('{args['station_name']}').",
-    'needs_transfer':        lambda args: f"needs_transfer('{args['station_a']}', '{args['station_b']}').",
-    'attraction_near_station': lambda args: f"attraction_near_station('{args['attraction_name']}', Station).",
-}
-
-# Keys in each function's arguments that hold station/location names needing resolution
-STATION_ARG_KEYS = {
-    'line_of':             ['station_name'],
-    'same_line':           ['station_a', 'station_b'],
-    'is_transfer_station': ['station_name'],
-    'needs_transfer':      ['station_a', 'station_b'],
-}
-
-
 class Orchestrator:
+    MAX_REPLAN = 3
+    _MATCH_TYPE_RANK = {"exact": 0, "prefix": 1, "substring": 2}
+
     def __init__(self):
         self.llm = LLMInterface()
         self.prolog = PrologInterface()
+        self._vocab_cache: list[str] | None = None
+        self._synonyms_cache: dict[str, str] | None = None
+
+    # ------------------------------------------------------------------
+    # Top-level dispatch.
+    # ------------------------------------------------------------------
 
     def handle(self, user_input: str, history: list | None = None) -> tuple[dict, list]:
         if history is None:
             history = []
 
-        result, history = self.llm.translate_to_query(user_input, history)
+        result, history = self.llm.translate_to_query(
+            user_input, history, self._vocab(), self._synonyms()
+        )
         if result is None:
-            return {"type": "error", "data": {"message": "Sorry, I couldn't process your request."}}, history
-
-        # If the LLM returned plain text instead of a function call
+            return self._error("Sorry, I couldn't process your request."), history
         if isinstance(result, str):
-            return {"type": "answer", "data": {"answer": result}}, history
+            return self._answer(result), history
 
-        function_name, arguments = result
+        function_name, args = result
         logger.info("Dispatching: %s", function_name)
 
-        # Route finding
-        if function_name == 'find_route':
-            return self._handle_find_route(arguments), history
-
-        # Schedule-based trip planning
-        if function_name == 'plan_trip':
-            return self._handle_plan_trip(arguments, history)
-
-        # Day planning with multiple stops + attractions
-        if function_name == 'plan_day':
-            return self._handle_plan_day(arguments, history)
-
-        # Explore trip planning (auto-discover attractions & nightlife)
-        if function_name == 'plan_explore':
-            return self._handle_plan_explore(arguments, history)
-
-        # Knowledge-base queries
-        if function_name in STATION_ARG_KEYS:
-            for key in STATION_ARG_KEYS[function_name]:
-                raw = arguments[key]
-                resolved = self._resolve_location(raw)
-                if resolved is None:
-                    return {"type": "error", "data": {"message": f"Unknown location: '{raw}'."}}, history
-                arguments[key] = resolved
-
-        query_builder = PROLOG_QUERY_MAP.get(function_name)
-        if query_builder is None:
-            return {"type": "error", "data": {"message": f"Unknown function: {function_name}"}}, history
-
-        prolog_query = query_builder(arguments)
-        logger.info("Prolog query: %s", prolog_query)
-        prolog_result = self.prolog.query(prolog_query)
-        logger.info("Prolog result: %s", prolog_result)
-        formatted, history = self.llm.format_prolog_result(
-            function_name,
-            result={"type": "answer", "data": {"answer": self._format_prolog_result(prolog_result)}},
-            history=history,
-        )
-        return formatted, history
+        if function_name != "plan":
+            return self._error(f"Unknown function: {function_name}"), history
+        return self._handle_plan(args, history)
 
     def handle_text(self, user_input: str) -> str:
-        """Legacy text-based interface for CLI usage."""
+        """CLI helper: returns just the natural-language answer."""
         result, _ = self.handle(user_input)
         if result["type"] == "error":
             return result["data"]["message"]
-        if result["type"] == "route":
-            return self._format_route_text(result["data"])
-        return result["data"].get("answer", str(result["data"]))
+        return result["data"].get("answer") or str(result["data"])
 
-    # ------------------------------------------------------------------
-    # Schedule / Trip Planning
-    # ------------------------------------------------------------------
-
-    def _handle_plan_trip(self, arguments: dict, history: list) -> tuple[dict, list]:
-        origin_raw = arguments['origin']
-        destination_raw = arguments['destination']
-        deadline_str = arguments.get('deadline', '09:00')
-
-        # Resolve station names
+    def handle_pure_route(self, origin_raw: str, dest_raw: str) -> dict:
+        """Public no-LLM entry for /api/route. Resolves names and runs the
+        pure-route pipeline (Dijkstra + symbolic step segmentation). Does
+        not touch the LLM — safe to call without GOOGLE_API_KEY."""
+        if not origin_raw or not dest_raw:
+            return self._error("Both start and end are required.")
         origin = self._resolve_location(origin_raw)
         if origin is None:
-            return {"type": "error", "data": {"message": f"Unknown location: '{origin_raw}'."}}, history
-        destination = self._resolve_location(destination_raw)
-        if destination is None:
-            return {"type": "error", "data": {"message": f"Unknown location: '{destination_raw}'."}}, history
+            return self._error(f"I don't recognize '{origin_raw}' as a station or POI.")
+        dest = self._resolve_location(dest_raw)
+        if dest is None:
+            return self._error(f"I don't recognize '{dest_raw}' as a station or POI.")
 
-        # Parse deadline from HH:MM to HHMM integer
-        deadline = self._parse_time(deadline_str)
-        if deadline is None:
-            return {"type": "error", "data": {"message": f"Invalid time format: '{deadline_str}'. Use HH:MM."}}, history
-
-        logger.info("Planning trip: %s → %s by %d", origin, destination, deadline)
-        itineraries = self.prolog.plan_trip(origin, destination, deadline)
-
-        if not itineraries:
-            result = {
-                "type": "answer",
-                "data": {"answer": f"No scheduled trips found from {origin} to {destination} arriving by {deadline_str}."}
-            }
-            return result, history
-
-        result = {
-            "type": "schedule",
-            "data": {
-                "origin": origin,
-                "destination": destination,
-                "deadline": deadline_str,
-                "itineraries": itineraries,
-            }
-        }
-
-        formatted, history = self.llm.format_prolog_result(
-            "plan_trip",
-            result=result,
-            history=history,
-        )
-        return formatted, history
-
-    def _handle_plan_day(self, arguments: dict, history: list) -> tuple[dict, list]:
-        origin_raw = arguments.get('origin', '')
-        stops = arguments.get('stops', [])
-
-        if not stops:
-            return {"type": "error", "data": {"message": "Please provide at least one stop."}}, history
-
-        # Resolve origin
-        origin = self._resolve_location(origin_raw)
-        if origin is None:
-            return {"type": "error", "data": {"message": f"Unknown location: '{origin_raw}'."}}, history
-
-        # Resolve all stop locations
-        resolved_stops = []
-        for stop in stops:
-            loc_raw = stop['location']
-            resolved = self._resolve_location(loc_raw)
-            if resolved is None:
-                return {"type": "error", "data": {"message": f"Unknown location: '{loc_raw}'."}}, history
-            deadline = self._parse_time(stop['arrive_by'])
-            if deadline is None:
-                return {"type": "error", "data": {"message": f"Invalid time: '{stop['arrive_by']}'."}}, history
-            resolved_stops.append({
-                "location": resolved,
-                "arrive_by": stop['arrive_by'],
-                "deadline_int": deadline,
-            })
-
-        # Build day plan: for each leg, plan trip + find attractions at destination
-        legs = []
-        current_origin = origin
-        for stop in resolved_stops:
-            dest = stop['location']
-            deadline_int = stop['deadline_int']
-
-            # Plan the transit leg
-            itineraries = self.prolog.plan_trip(current_origin, dest, deadline_int)
-
-            # Find attractions near the destination station
-            attractions = self.prolog.attractions_near(dest)
-
-            legs.append({
-                "from": current_origin,
-                "to": dest,
-                "arrive_by": stop['arrive_by'],
-                "itineraries": itineraries,
-                "attractions": attractions,
-            })
-
-            current_origin = dest
-
-        result = {
-            "type": "day_plan",
-            "data": {
-                "origin": origin,
-                "stops": [s['location'] for s in resolved_stops],
-                "legs": legs,
-            }
-        }
-
-        formatted, history = self.llm.format_prolog_result(
-            "plan_day",
-            result=result,
-            history=history,
-        )
-        return formatted, history
-
-    def _handle_plan_explore(self, arguments: dict, history: list) -> tuple[dict, list]:
-        """Unified explore planner:
-        - Python Dijkstra for fast cross-line routing
-        - Prolog KB for attraction and nightlife venue inference
-        Auto-discovers the best areas with points of interest reachable by transit,
-        combining both attractions and nightlife venues into a single trip plan.
-        """
-        origin_raw = arguments['origin']
-        start_time_str = arguments.get('start_time', '09:00')
-        end_time_str = arguments.get('end_time', '17:00')
-
-        # Resolve origin
-        origin = self._resolve_location(origin_raw)
-        if origin is None:
-            return {"type": "error", "data": {"message": f"Unknown location: '{origin_raw}'."}}, history
-
-        start_time = self._parse_time(start_time_str)
-        if start_time is None:
-            return {"type": "error", "data": {"message": f"Invalid time format: '{start_time_str}'."}}, history
-        end_time = self._parse_time(end_time_str)
-        if end_time is None:
-            return {"type": "error", "data": {"message": f"Invalid time format: '{end_time_str}'."}}, history
-
-        # --- Prolog KB: get all attractions (including nightlife) grouped by station ---
-        attractions_by_station = self.prolog.get_attractions_by_station()
-
-        if not attractions_by_station:
-            return {"type": "answer", "data": {"answer": "No points of interest found in the knowledge base."}}, history
-
-        # --- Python Dijkstra: find reachable areas ---
         edges = self.prolog.get_all_edges()
         graph = self._build_graph(edges)
+        path, cost = self._dijkstra(graph, origin, dest)
+        if path is None:
+            return self._error(f"No route found from '{origin}' to '{dest}'.")
 
-        reachable = []
-        for station, attractions in attractions_by_station.items():
-            path, cost = self._dijkstra(graph, origin, station)
-            if path is not None:
-                reachable.append({
-                    "station": station,
-                    "cost": cost,
-                    "attractions": attractions,
-                    "path": path,
-                })
-
-        if not reachable:
-            return {"type": "answer", "data": {"answer": "No areas with points of interest reachable from your location via transit."}}, history
-
-        # Sort by travel time and select up to 4 diverse stops
-        reachable.sort(key=lambda x: x['cost'])
-        selected = self._select_explore_stops(reachable, max_stops=4)
-
-        # Calculate suggested arrival times spread across the time window
-        start_min = (start_time // 100) * 60 + (start_time % 100)
-        end_min = (end_time // 100) * 60 + (end_time % 100)
-        # Handle past-midnight end times (e.g. 02:00 when start is 19:00)
-        if end_min <= start_min:
-            end_min += 24 * 60
-        total_min = end_min - start_min
-        slot_min = max(60, total_min // (len(selected) + 1))
-
-        # --- Build legs using Dijkstra route ---
-        legs = []
-        current_origin = origin
-        for i, stop in enumerate(selected):
-            arrive_min = start_min + (i + 1) * slot_min
-            arrive_h, arrive_m = divmod(arrive_min % (24 * 60), 60)
-            arrive_str = f"{arrive_h:02d}:{arrive_m:02d}"
-
-            route_data = self._find_and_format_route(current_origin, stop['station'])
-
-            legs.append({
-                "from": current_origin,
-                "to": stop['station'],
-                "arrive_by": arrive_str,
-                "route": route_data.get("data") if route_data["type"] == "route" else None,
-                "attractions": stop['attractions'],
-            })
-
-            current_origin = stop['station']
-
-        # Determine if end time is past midnight or very late
-        past_midnight = end_time < start_time
-        last_train_note = (
-            "Bangkok's rail transit operates until approximately midnight. "
-            "For your return trip after midnight, use Grab or a taxi."
-        ) if past_midnight or end_time > 2330 else None
-
-        result = {
-            "type": "explore",
+        return {
+            "type": "plan",
             "data": {
                 "origin": origin,
-                "stops": [s['station'] for s in selected],
-                "legs": legs,
-                "start_time": start_time_str,
-                "end_time": end_time_str,
-                "last_train_note": last_train_note,
-            }
+                "destination": dest,
+                "total_time": cost,
+                "steps": self.prolog.build_route_steps(path),
+            },
         }
 
-        formatted, history = self.llm.format_prolog_result("plan_explore", result, history)
-        return formatted, history
+    # ------------------------------------------------------------------
+    # The plan handler — the audit/relax loop.
+    # ------------------------------------------------------------------
 
-    @staticmethod
-    def _select_explore_stops(reachable: list[dict], max_stops: int = 4) -> list[dict]:
-        """Pick up to max_stops areas, skipping stations too close together."""
-        if len(reachable) <= max_stops:
-            return reachable
-        selected = [reachable[0]]
-        for candidate in reachable[1:]:
-            if len(selected) >= max_stops:
+    def _handle_plan(self, args: dict, history: list) -> tuple[dict, list]:
+        origin_raw = args.get("origin")
+        goal = args.get("goal")
+        if not origin_raw or not goal:
+            return self._error("I need both an origin and a goal to plan a trip."), history
+
+        origin = self._resolve_location(origin_raw)
+        if origin is None:
+            return self._error(f"I don't recognize '{origin_raw}' as a station or POI."), history
+
+        if self._is_pure_route(goal):
+            dest_raw = self._extract_route_to(goal)
+            return self._handle_pure_route(origin, dest_raw, history)
+
+        try:
+            unknowns = self.prolog.unknown_tags(goal)
+        except GoalShapeError as e:
+            return self._error(f"Malformed goal: {e}"), history
+
+        if unknowns:
+            return self._handle_unknown_tags(origin, unknowns, history)
+
+        cands = self.prolog.candidates(goal)
+        relaxation_note: list[str] | None = None
+        if not cands:
+            relaxed = self.prolog.relax(goal)
+            if relaxed is None:
+                return self._answer(
+                    "I couldn't find anything matching, even after relaxing your constraints."
+                ), history
+            dropped, cands = relaxed
+            relaxation_note = dropped
+            logger.info("Relaxed by dropping: %s", dropped)
+
+        edges = self.prolog.get_all_edges()
+        graph = self._build_graph(edges)
+        ranked: list[dict] = []
+        for c in cands:
+            path, cost = self._dijkstra(graph, origin, c["station"])
+            if path is None:
+                continue
+            ranked.append({**c, "path": path, "cost": cost})
+        if not ranked:
+            return self._answer(
+                "I found matching places but none are reachable from your origin in the network."
+            ), history
+
+        ranked.sort(key=lambda r: (-r["pref_score"], r["cost"]))
+
+        chosen, audit_trail = self._select_via_audit(ranked, goal)
+
+        if chosen is None:
+            data = {
+                "origin": origin,
+                "relaxation_note": relaxation_note,
+                "audit_trail": audit_trail,
+                "alternatives": [r["name"] for r in ranked[:5]],
+                "note": "Every candidate route violated one of your hard constraints.",
+            }
+            return self._format({"type": "plan", "data": data}, history)
+
+        data = {
+            "origin": origin,
+            "destination": chosen["station"],
+            "poi": chosen["name"],
+            "total_time": chosen["cost"],
+            "steps": chosen["steps"],
+            "preference_score": chosen["pref_score"],
+            "relaxation_note": relaxation_note,
+            "audit_trail": audit_trail,
+            "alternatives": [
+                r["name"] for r in ranked[:5] if r["name"] != chosen["name"]
+            ],
+        }
+        return self._format({"type": "plan", "data": data}, history)
+
+    def _select_via_audit(
+        self, ranked: list[dict], goal: dict
+    ) -> tuple[dict | None, list[dict]]:
+        """Walk the ranked candidates, auditing each route. Blacklist on
+        violation and try the next. Bounded at MAX_REPLAN sweeps."""
+        audit_trail: list[dict] = []
+        blacklist: set[str] = set()
+        for _sweep in range(self.MAX_REPLAN):
+            for r in ranked:
+                if r["name"] in blacklist:
+                    continue
+                violations = self.prolog.audit_route_for_path(r["path"], goal)
+                if not violations:
+                    return (
+                        {**r, "steps": self.prolog.build_route_steps(r["path"])},
+                        audit_trail,
+                    )
+                audit_trail.append({"candidate": r["name"], "violations": violations})
+                blacklist.add(r["name"])
+                logger.info("Audit failed for %s: %s", r["name"], violations)
+            if len(blacklist) >= len(ranked):
                 break
-            too_close = any(abs(candidate['cost'] - s['cost']) < 5 for s in selected)
-            if not too_close:
-                selected.append(candidate)
-        if len(selected) < max_stops:
-            for candidate in reachable:
-                if len(selected) >= max_stops:
-                    break
-                if candidate not in selected:
-                    selected.append(candidate)
-        return selected
+        return None, audit_trail
+
+    # ------------------------------------------------------------------
+    # Pure-route shortcut.
+    # ------------------------------------------------------------------
+
+    def _handle_pure_route(
+        self, origin: str, dest_raw: str, history: list
+    ) -> tuple[dict, list]:
+        dest = self._resolve_location(dest_raw)
+        if dest is None:
+            return self._error(f"I don't recognize '{dest_raw}' as a destination."), history
+
+        edges = self.prolog.get_all_edges()
+        graph = self._build_graph(edges)
+        path, cost = self._dijkstra(graph, origin, dest)
+        if path is None:
+            return self._error(f"No route found from '{origin}' to '{dest}'."), history
+
+        steps = self.prolog.build_route_steps(path)
+        data = {
+            "origin": origin,
+            "destination": dest,
+            "total_time": cost,
+            "steps": steps,
+        }
+        return self._format({"type": "plan", "data": data}, history)
+
+    # ------------------------------------------------------------------
+    # Goal-shape predicates.
+    # ------------------------------------------------------------------
 
     @staticmethod
-    def _parse_time(time_str: str) -> int | None:
-        """Parse 'HH:MM' or 'HHMM' into integer HHMM."""
-        time_str = time_str.strip()
-        if ':' in time_str:
-            parts = time_str.split(':')
-            if len(parts) == 2:
-                try:
-                    h, m = int(parts[0]), int(parts[1])
-                    if 0 <= h <= 23 and 0 <= m <= 59:
-                        return h * 100 + m
-                except ValueError:
-                    return None
-        else:
-            try:
-                val = int(time_str)
-                if 0 <= val <= 2359:
-                    return val
-            except ValueError:
-                return None
+    def _is_pure_route(goal: dict) -> bool:
+        """True when goal is `route_to` alone (or wrapped in a singleton and/or)."""
+        if not isinstance(goal, dict) or len(goal) != 1:
+            return False
+        op, arg = next(iter(goal.items()))
+        if op == "route_to":
+            return True
+        if op in ("and", "or") and isinstance(arg, list) and len(arg) == 1:
+            return Orchestrator._is_pure_route(arg[0])
+        return False
+
+    @staticmethod
+    def _extract_route_to(goal: dict) -> str | None:
+        if not isinstance(goal, dict) or len(goal) != 1:
+            return None
+        op, arg = next(iter(goal.items()))
+        if op == "route_to":
+            return arg
+        if op in ("and", "or") and isinstance(arg, list):
+            for sub in arg:
+                found = Orchestrator._extract_route_to(sub)
+                if found is not None:
+                    return found
         return None
 
     # ------------------------------------------------------------------
-    # Schedule direct query (bypass LLM, used by API)
+    # Unknown-tag handling — surface back to the user.
     # ------------------------------------------------------------------
 
-    def plan_trip(self, origin: str, destination: str, deadline: str) -> dict:
-        """Direct schedule query without LLM — used by the /api/schedule endpoint."""
-        origin_resolved = self._resolve_location(origin)
-        if origin_resolved is None:
-            return {"type": "error", "data": {"message": f"Unknown location: '{origin}'."}}
-        destination_resolved = self._resolve_location(destination)
-        if destination_resolved is None:
-            return {"type": "error", "data": {"message": f"Unknown location: '{destination}'."}}
-
-        deadline_int = self._parse_time(deadline)
-        if deadline_int is None:
-            return {"type": "error", "data": {"message": f"Invalid time format: '{deadline}'. Use HH:MM."}}
-
-        itineraries = self.prolog.plan_trip(origin_resolved, destination_resolved, deadline_int)
-        if not itineraries:
-            return {
-                "type": "error",
-                "data": {"message": f"No scheduled trips found from {origin_resolved} to {destination_resolved} arriving by {deadline}."}
-            }
-
-        return {
-            "type": "schedule",
+    def _handle_unknown_tags(
+        self, origin: str, unknowns: list[str], history: list
+    ) -> tuple[dict, list]:
+        sample = ", ".join(self._vocab()[:8])
+        note = (
+            f"I don't recognize {', '.join(repr(u) for u in unknowns)}. "
+            f"Try terms like: {sample}..."
+        )
+        result = {
+            "type": "plan",
             "data": {
-                "origin": origin_resolved,
-                "destination": destination_resolved,
-                "deadline": deadline,
-                "itineraries": itineraries,
-            }
+                "origin": origin,
+                "unknown_tags": unknowns,
+                "note": note,
+            },
         }
+        return self._format(result, history)
 
     # ------------------------------------------------------------------
-    # Route handling
+    # Vocabulary cache (one query per process; KB facts don't change).
     # ------------------------------------------------------------------
 
-    def _handle_find_route(self, arguments: dict) -> dict:
-        start_raw = arguments['start']
-        end_raw = arguments['end']
+    def _vocab(self) -> list[str]:
+        if self._vocab_cache is None:
+            self._vocab_cache = self.prolog.active_tag_vocabulary()
+        return self._vocab_cache
 
-        start = self._resolve_location(start_raw)
-        if start is None:
-            return {"type": "error", "data": {"message": f"Unknown location: '{start_raw}'."}}
-        end = self._resolve_location(end_raw)
-        if end is None:
-            return {"type": "error", "data": {"message": f"Unknown location: '{end_raw}'."}}
-
-        logger.info("Running Dijkstra from '%s' to '%s'", start, end)
-        return self._find_and_format_route(start, end)
+    def _synonyms(self) -> dict[str, str]:
+        if self._synonyms_cache is None:
+            self._synonyms_cache = self.prolog.active_synonyms()
+        return self._synonyms_cache
 
     # ------------------------------------------------------------------
-    # Name resolution
+    # Result formatting + simple shapes.
+    # ------------------------------------------------------------------
+
+    def _format(self, result: dict, history: list) -> tuple[dict, list]:
+        return self.llm.format_result(result, history, self._vocab(), self._synonyms())
+
+    @staticmethod
+    def _answer(text: str) -> dict:
+        return {"type": "answer", "data": {"answer": text}}
+
+    @staticmethod
+    def _error(message: str) -> dict:
+        return {"type": "error", "data": {"message": message}}
+
+    # ------------------------------------------------------------------
+    # Name resolution: Prolog classifies, Python ranks + edit-distance fallback.
     # ------------------------------------------------------------------
 
     def _resolve_location(self, raw_name: str) -> str | None:
-        # 1. Exact match via Prolog resolve_location (attraction or station)
-        resolved = self.prolog.resolve_location(raw_name)
-        if resolved:
-            return resolved
-
-        # 2. Classified fuzzy match — Prolog infers candidates and classifies
-        #    them as exact/prefix/substring; Python ranks and selects.
-        candidates = self.prolog.match_station_classified(raw_name)
-        if not candidates:
-            # 3. No Prolog match — try edit-distance against all stations
-            #    (handles typos like "Saim" → "Siam")
-            return self._best_edit_distance_match(raw_name)
-
-        best = self._rank_candidates(raw_name, candidates)
-        if best:
-            logger.info("Resolved '%s' → '%s'", raw_name, best)
-            return best
-
-        logger.info("Could not resolve location: '%s'", raw_name)
-        return None
-
-    # ------------------------------------------------------------------
-    # Hybrid ranking: Prolog classifies, Python scores
-    # ------------------------------------------------------------------
-
-    # Priority order for match types (lower = better)
-    _MATCH_TYPE_RANK = {"exact": 0, "prefix": 1, "substring": 2}
-
-    def _rank_candidates(self, raw_name: str, candidates: list[dict]) -> str | None:
-        """Pick the best candidate using Prolog's match classification
-        and difflib similarity for tie-breaking."""
-        if not candidates:
+        if not raw_name:
             return None
 
+        if self.prolog.is_valid_station(raw_name):
+            return raw_name
+
+        candidates = self.prolog.match_station_classified(raw_name)
+        if candidates:
+            best = self._rank_candidates(raw_name, candidates)
+            if best:
+                logger.info("Resolved '%s' → '%s'", raw_name, best)
+                return best
+
+        poi_station = self._poi_display_to_station(raw_name)
+        if poi_station:
+            logger.info("Resolved POI '%s' → '%s'", raw_name, poi_station)
+            return poi_station
+
+        return self._best_edit_distance_match(raw_name)
+
+    def _poi_display_to_station(self, raw_name: str) -> str | None:
+        """Look up a POI by display name (case-insensitive, prefix/substring).
+
+        This lets users say "Grand Palace" and have the engine route to
+        the POI's nearest station. We do this in Prolog (it owns the
+        name normalization) but let Python decide between equally good
+        candidates.
+        """
+        safe = raw_name.replace("\\", "\\\\").replace("'", "\\'")
+        query = (
+            f"poi(_, Display, Station), "
+            f"downcase_atom(Display, DL), "
+            f"downcase_atom('{safe}', RL), "
+            f"(DL = RL ; sub_atom(DL, 0, _, _, RL) ; sub_atom(DL, _, _, _, RL))"
+        )
+        try:
+            for r in self.prolog.prolog.query(query):
+                return str(r["Station"])
+        except Exception as e:
+            logger.warning("POI lookup failed for '%s': %s", raw_name, e)
+        return None
+
+    def _rank_candidates(self, raw_name: str, candidates: list[dict]) -> str | None:
+        if not candidates:
+            return None
         raw_lower = raw_name.lower()
 
         def score(c):
             type_rank = self._MATCH_TYPE_RANK.get(c["match_type"], 9)
-            similarity = SequenceMatcher(None, raw_lower, c["station"].lower()).ratio()
-            # Sort by: type rank ascending, then similarity descending
-            return (type_rank, -similarity)
+            sim = SequenceMatcher(None, raw_lower, c["station"].lower()).ratio()
+            return (type_rank, -sim)
 
-        candidates_sorted = sorted(candidates, key=score)
-        best = candidates_sorted[0]
-
-        # Only accept substring matches if similarity is high enough
+        best = sorted(candidates, key=score)[0]
         if best["match_type"] == "substring":
             sim = SequenceMatcher(None, raw_lower, best["station"].lower()).ratio()
             if sim < 0.4:
                 return None
-
         return best["station"]
 
-    @staticmethod
-    def _station_base_name(station: str) -> str:
-        """Extract the station name without the code suffix, e.g. 'Siam (CEN)' → 'Siam'."""
-        idx = station.find(" (")
-        return station[:idx] if idx != -1 else station
-
-    def _best_edit_distance_match(self, raw_name: str, threshold: float = 0.75) -> str | None:
-        """Fallback: find the closest station by edit distance (handles typos).
-        Compares against the base name (without station code) for better matching.
-        Uses a high threshold (0.75) to avoid false positives on unrelated words."""
-        all_stations = self.prolog.get_all_station_names()
+    def _best_edit_distance_match(
+        self, raw_name: str, threshold: float = 0.75
+    ) -> str | None:
         raw_lower = raw_name.lower()
-        best_station = None
-        best_score = 0.0
-        for station in all_stations:
-            base = self._station_base_name(station).lower()
-            # Require similar length to avoid false positives on unrelated words
+        best_station, best_score = None, 0.0
+        for station in self.prolog.get_all_station_names():
+            base = station.split(" (")[0].lower()
             if abs(len(raw_lower) - len(base)) > 1:
                 continue
             sim = SequenceMatcher(None, raw_lower, base).ratio()
@@ -489,44 +398,30 @@ class Orchestrator:
                 best_score = sim
                 best_station = station
         if best_score >= threshold:
-            logger.info("Edit-distance matched '%s' → '%s' (score=%.2f)", raw_name, best_station, best_score)
+            logger.info(
+                "Edit-distance matched '%s' → '%s' (%.2f)",
+                raw_name, best_station, best_score,
+            )
             return best_station
         return None
 
     # ------------------------------------------------------------------
-    # Route finding (Python Dijkstra, graph data pulled from Prolog)
+    # Dijkstra (Python — Prolog has no business here).
     # ------------------------------------------------------------------
 
-    def _find_and_format_route(self, start: str, end: str) -> dict:
-        edges = self.prolog.get_all_edges()
-        graph = self._build_graph(edges)
-        path, cost = self._dijkstra(graph, start, end)
-
-        if path is None:
-            return {"type": "error", "data": {"message": f"No route found from '{start}' to '{end}'."}}
-
-        # Delegate route step building to Prolog inference
-        steps = self.prolog.build_route_steps(path)
-
-        return {
-            "type": "route",
-            "data": {
-                "from": path[0],
-                "to": path[-1],
-                "total_time": cost,
-                "steps": steps,
-            }
-        }
-
-    def _build_graph(self, edges):
-        graph = {}
+    @staticmethod
+    def _build_graph(edges: list[tuple[str, str, int]]) -> dict[str, list[tuple[str, int]]]:
+        graph: dict[str, list[tuple[str, int]]] = {}
         for a, b, t in edges:
             graph.setdefault(a, []).append((b, t))
         return graph
 
-    def _dijkstra(self, graph, start, end):
+    @staticmethod
+    def _dijkstra(graph, start, end):
+        if start == end:
+            return [start], 0
         heap = [(0, start, [start])]
-        visited = set()
+        visited: set[str] = set()
         while heap:
             cost, node, path = heapq.heappop(heap)
             if node in visited:
@@ -538,60 +433,3 @@ class Orchestrator:
                 if neighbor not in visited:
                     heapq.heappush(heap, (cost + weight, neighbor, path + [neighbor]))
         return None, None
-
-    def _format_route_text(self, data: dict) -> str:
-        output = [
-            f"Route: {data['from']}  →  {data['to']}",
-            f"Estimated travel time: ~{data['total_time']} minutes\n",
-        ]
-        step_num = 1
-        for step in data['steps']:
-            if step['type'] == 'transfer':
-                output.append(f"  [Transfer] Walk from {step['from']}  →  {step['to']}")
-            else:
-                output.append(f"  Step {step_num}: {step['line']}")
-                output.append(f"    Board at : {step['board']}")
-                output.append(f"    Alight at: {step['alight']}")
-                step_num += 1
-        return "\n".join(output)
-
-    # ------------------------------------------------------------------
-    # Prolog result formatting
-    # ------------------------------------------------------------------
-
-    def _format_prolog_result(self, result) -> str:
-        if isinstance(result, str):
-            return result
-        if result is None:
-            return "No results found."
-        if not result:
-            return "No."
-        if all(b == {} for b in result):
-            return "Yes."
-
-        lines = []
-        for binding in result:
-            pairs = ",  ".join(f"{k} = {v}" for k, v in binding.items())
-            lines.append(f"  {pairs}")
-        return "\n".join(lines)
-
-    # ------------------------------------------------------------------
-    # Direct query methods (bypass LLM, used by API)
-    # ------------------------------------------------------------------
-
-    def find_route(self, start: str, end: str) -> dict:
-        return self._handle_find_route({"start": start, "end": end})
-
-    def get_all_stations_with_lines(self) -> list[dict]:
-        station_lines = self.prolog.get_station_lines()
-        return [
-            {"name": name, "lines": lines}
-            for name, lines in sorted(station_lines.items())
-        ]
-
-    def get_all_attractions(self) -> list[dict]:
-        results = list(self.prolog.prolog.query("near_station(Attraction, Station)"))
-        return [
-            {"name": str(r["Attraction"]), "station": str(r["Station"])}
-            for r in results
-        ]

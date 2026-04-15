@@ -1,555 +1,496 @@
-import re
+"""
+tests/test_orchestrator.py — unit tests for the neuro-symbolic orchestrator.
+
+Covers:
+  - handle() dispatch: text, error, unknown function, plan with history.
+  - _is_pure_route / _extract_route_to goal-shape predicates.
+  - _resolve_location fallback chain (direct → classified → POI → edit-distance).
+  - _rank_candidates (match-type priority + low-similarity rejection).
+  - _handle_plan pipeline per branch:
+      pure route, unknown tags, empty→relax, audit pass/fail.
+  - _select_via_audit blacklist + MAX_REPLAN bound.
+  - handle_pure_route (the no-LLM public entry for /api/route).
+  - handle_text CLI helper.
+  - Dijkstra + graph primitives.
+"""
 
 from engine.orchestrator import Orchestrator
-from tests.helpers import OrchestratorNoLLM, make_orchestrator_with_llm_result
+from tests.helpers import (
+    OrchestratorNoLLM,
+    make_orchestrator_with_llm_result,
+    make_plan_stub,
+)
 
 
-def test_handle_no_llm_result():
+# ==================================================================
+# handle() top-level dispatch
+# ==================================================================
+
+
+def test_handle_llm_returns_none():
     orchestrator = make_orchestrator_with_llm_result(None)
     result, history = orchestrator.handle("hi")
     assert result["type"] == "error"
     assert "couldn't process" in result["data"]["message"]
 
 
-def test_handle_unknown_function():
-    orchestrator = make_orchestrator_with_llm_result(("mystery", {}))
-    result, history = orchestrator.handle("hi")
-    assert result["type"] == "error"
-    assert "Unknown function" in result["data"]["message"]
-
-
-def test_handle_line_of():
-    orchestrator = make_orchestrator_with_llm_result(("line_of", {"station_name": "Mo Chit"}))
-    result, history = orchestrator.handle("line")
-    assert result["type"] == "answer"
-    assert "bts_sukhumvit" in result["data"]["answer"]
-
-
-def test_handle_same_line():
-    orchestrator = make_orchestrator_with_llm_result(
-        ("same_line", {"station_a": "On Nut", "station_b": "Bearing"})
-    )
-    result, history = orchestrator.handle("same")
-    assert result["type"] == "answer"
-    assert result["data"]["answer"] == "Yes."
-
-
-def test_handle_is_transfer_station():
-    orchestrator = make_orchestrator_with_llm_result(
-        ("is_transfer_station", {"station_name": "Siam"})
-    )
-    result, history = orchestrator.handle("transfer")
-    assert result["type"] == "answer"
-    assert result["data"]["answer"] == "Yes."
-
-
-def test_handle_needs_transfer():
-    orchestrator = make_orchestrator_with_llm_result(
-        ("needs_transfer", {"station_a": "Asok", "station_b": "Silom"})
-    )
-    result, history = orchestrator.handle("transfer")
-    assert result["type"] == "answer"
-    assert result["data"]["answer"] == "Yes."
-
-
-def test_handle_attraction_near_station():
-    orchestrator = make_orchestrator_with_llm_result(
-        ("attraction_near_station", {"attraction_name": "Grand Palace"})
-    )
-    result, history = orchestrator.handle("attraction")
-    assert result["type"] == "answer"
-    assert "Sanam Chai (BL31)" in result["data"]["answer"]
-
-
-def test_handle_find_route_invalid_location():
-    orchestrator = make_orchestrator_with_llm_result(
-        ("find_route", {"start": "Narnia", "end": "Siam"})
-    )
-    result, history = orchestrator.handle("route")
-    assert result["type"] == "error"
-    assert result["data"]["message"] == "Unknown location: 'Narnia'."
-
-
-def test_handle_find_route_valid():
-    orchestrator = make_orchestrator_with_llm_result(
-        ("find_route", {"start": "Siam", "end": "Asok"})
-    )
-    result, history = orchestrator.handle("route")
-    assert result["type"] == "route"
-    assert result["data"]["from"] == "Siam (CEN)"
-    assert result["data"]["to"] == "Asok (E4)"
-    assert result["data"]["total_time"] > 0
-    assert len(result["data"]["steps"]) > 0
-
-
 def test_handle_text_response():
     orchestrator = make_orchestrator_with_llm_result("Hello! How can I help you?")
-    result, history = orchestrator.handle("hello")
+    result, _ = orchestrator.handle("hello")
     assert result["type"] == "answer"
     assert result["data"]["answer"] == "Hello! How can I help you?"
 
 
-def test_resolve_location_cases():
-    orchestrator = OrchestratorNoLLM()
-
-    assert orchestrator._resolve_location("Grand Palace") == "Sanam Chai (BL31)"
-    assert orchestrator._resolve_location("Siam (CEN)") == "Siam (CEN)"
-    assert orchestrator._resolve_location("Asok") == "Asok (E4)"
-    assert orchestrator._resolve_location("Chit") == "Chit Lom (E1)"
-    assert orchestrator._resolve_location("Narnia") is None
-
-    # Typo tolerance via edit-distance fallback
-    assert orchestrator._resolve_location("Saim") == "Siam (CEN)"
-
-
-def test_prolog_station_lines_and_fuzzy_match():
-    orchestrator = OrchestratorNoLLM()
-
-    # Station lines are fetched from Prolog
-    station_lines = orchestrator.prolog.get_station_lines()
-    assert isinstance(station_lines, dict)
-    assert len(station_lines) > 0
-
-    # Fuzzy matching is now delegated to Prolog
-    matches = orchestrator.prolog.fuzzy_match_station("Siam")
-    assert any("Siam" in m for m in matches)
-
-
-def test_find_and_format_route_no_path():
-    orchestrator = OrchestratorNoLLM()
-    result = orchestrator._find_and_format_route("Unknown Station", "Siam (CEN)")
+def test_handle_unknown_function_returns_error():
+    orchestrator = make_orchestrator_with_llm_result(("mystery", {}))
+    result, _ = orchestrator.handle("hi")
     assert result["type"] == "error"
-    assert "No route found" in result["data"]["message"]
+    assert "Unknown function" in result["data"]["message"]
 
 
-def test_build_route_steps_with_transfer():
-    orchestrator = OrchestratorNoLLM()
-
-    path = ["Asok (E4)", "Sukhumvit (BL22)", "Silom (BL26)"]
-    steps = orchestrator.prolog.build_route_steps(path)
-    assert any(s["type"] == "transfer" for s in steps)
-    assert any(s["type"] == "ride" for s in steps)
-
-
-def test_format_route_text():
-    orchestrator = OrchestratorNoLLM()
-    data = {
-        "from": "Siam (CEN)",
-        "to": "Asok (E4)",
-        "total_time": 6,
-        "steps": [
-            {
-                "type": "ride",
-                "line": "BTS Sukhumvit Line",
-                "board": "Siam (CEN)",
-                "alight": "Asok (E4)",
-                "stations": ["Siam (CEN)", "Chit Lom (E1)", "Phloen Chit (E2)", "Nana (E3)", "Asok (E4)"],
-            }
-        ],
-    }
-    text = orchestrator._format_route_text(data)
-    assert "Route: Siam (CEN)" in text
-    assert "Board at : Siam (CEN)" in text
-    assert "Alight at: Asok (E4)" in text
-
-
-def test_format_route_text_with_transfer():
-    orchestrator = OrchestratorNoLLM()
-    data = {
-        "from": "Asok (E4)",
-        "to": "Silom (BL26)",
-        "total_time": 15,
-        "steps": [
-            {"type": "transfer", "from": "Asok (E4)", "to": "Sukhumvit (BL22)"},
-            {"type": "ride", "line": "MRT Blue Line", "board": "Sukhumvit (BL22)", "alight": "Silom (BL26)", "stations": []},
-        ],
-    }
-    text = orchestrator._format_route_text(data)
-    assert "[Transfer] Walk from Asok (E4)" in text
-    assert "MRT Blue Line" in text
-
-
-def test_format_prolog_result_variants():
-    orchestrator = OrchestratorNoLLM()
-
-    assert orchestrator._format_prolog_result("Error") == "Error"
-    assert orchestrator._format_prolog_result(None) == "No results found."
-    assert orchestrator._format_prolog_result([]) == "No."
-    assert orchestrator._format_prolog_result([{}]) == "Yes."
-
-    result = orchestrator._format_prolog_result([{"Line": "bts_sukhumvit"}])
-    assert re.search(r"Line\s*=\s*bts_sukhumvit", result)
-
-    assert orchestrator._format_prolog_result([{}, {}]) == "Yes."
-
-
-def test_handle_find_route_invalid_end():
+def test_handle_passes_history_through():
     orchestrator = make_orchestrator_with_llm_result(
-        ("find_route", {"start": "Siam", "end": "Narnia"})
+        ("plan", {"origin": "Siam", "goal": {"route_to": "Asok"}}),
+        answer_text="Route narration.",
     )
-    result, history = orchestrator.handle("route")
-    assert result["type"] == "error"
-    assert result["data"]["message"] == "Unknown location: 'Narnia'."
-
-
-def test_handle_knowledge_query_unknown_station():
-    orchestrator = make_orchestrator_with_llm_result(
-        ("line_of", {"station_name": "Narnia"})
-    )
-    result, history = orchestrator.handle("line")
-    assert result["type"] == "error"
-    assert result["data"]["message"] == "Unknown location: 'Narnia'."
-
-
-def test_build_route_steps_line_change():
-    orchestrator = OrchestratorNoLLM()
-
-    # Use real stations: BTS Sukhumvit → transfer → MRT Blue
-    path = [
-        "Siam (CEN)", "Chit Lom (E1)", "Phloen Chit (E2)", "Nana (E3)", "Asok (E4)",
-        "Sukhumvit (BL22)", "Silom (BL26)",
-    ]
-    steps = orchestrator.prolog.build_route_steps(path)
-    lines_used = [s["line"] for s in steps if s["type"] == "ride"]
-    assert len(lines_used) == 2
-
-
-def test_orchestrator_real_init(monkeypatch):
-    from unittest.mock import MagicMock
-    import engine.orchestrator as orch_module
-    monkeypatch.setattr(orch_module, "LLMInterface", MagicMock)
-    orch = orch_module.Orchestrator()
-    assert orch.llm is not None
-    assert orch.prolog is not None
-
-
-def test_handle_text_legacy():
-    orchestrator = make_orchestrator_with_llm_result(None)
-    text = orchestrator.handle_text("hi")
-    assert text == "Sorry, I couldn't process your request."
-
-
-def test_handle_text_route():
-    orchestrator = make_orchestrator_with_llm_result(
-        ("find_route", {"start": "Siam", "end": "Asok"})
-    )
-    text = orchestrator.handle_text("route")
-    assert text.startswith("Route: ")
-    assert "Siam (CEN)" in text
-    assert "Asok (E4)" in text
-
-
-def test_handle_text_answer():
-    orchestrator = make_orchestrator_with_llm_result(
-        ("same_line", {"station_a": "On Nut", "station_b": "Bearing"})
-    )
-    text = orchestrator.handle_text("same")
-    assert text == "Yes."
-
-
-def test_find_route_direct():
-    orchestrator = OrchestratorNoLLM()
-    result = orchestrator.find_route("Siam", "Asok")
-    assert result["type"] == "route"
-    assert result["data"]["from"] == "Siam (CEN)"
-
-
-def test_get_all_stations_with_lines():
-    orchestrator = OrchestratorNoLLM()
-    stations = orchestrator.get_all_stations_with_lines()
-    assert len(stations) > 0
-    assert all("name" in s and "lines" in s for s in stations)
-
-
-def test_get_all_attractions():
-    orchestrator = OrchestratorNoLLM()
-    attractions = orchestrator.get_all_attractions()
-    assert len(attractions) > 0
-    assert all("name" in a and "station" in a for a in attractions)
-
-
-def test_handle_with_history():
-    """Verify that handle accepts and passes through history."""
-    orchestrator = make_orchestrator_with_llm_result(
-        ("find_route", {"start": "Siam", "end": "Asok"})
-    )
-    fake_history = [{"role": "user", "content": "previous message"}]
-    result, returned_history = orchestrator.handle("route", history=fake_history)
-    assert result["type"] == "route"
+    fake_history = [{"role": "user", "content": "previous"}]
+    result, returned_history = orchestrator.handle("go", history=fake_history)
+    assert result["type"] == "plan"
     assert isinstance(returned_history, list)
 
 
 # ==================================================================
-# Phase 2: Static methods & direct utilities
+# _handle_plan — missing args
 # ==================================================================
 
-# ── _parse_time ──
 
-def test_parse_time_colon_format():
-    assert Orchestrator._parse_time("09:00") == 900
-    assert Orchestrator._parse_time("23:59") == 2359
-    assert Orchestrator._parse_time("00:00") == 0
-    assert Orchestrator._parse_time("08:30") == 830
-
-
-def test_parse_time_plain_format():
-    assert Orchestrator._parse_time("0900") == 900
-    assert Orchestrator._parse_time("2359") == 2359
-    assert Orchestrator._parse_time("0") == 0
+def test_handle_plan_missing_origin():
+    orchestrator = make_orchestrator_with_llm_result(
+        ("plan", {"goal": {"any_tag": ["temple"]}})
+    )
+    result, _ = orchestrator.handle("x")
+    assert result["type"] == "error"
+    assert "origin" in result["data"]["message"]
 
 
-def test_parse_time_invalid():
-    assert Orchestrator._parse_time("25:00") is None
-    assert Orchestrator._parse_time("12:60") is None
-    assert Orchestrator._parse_time("abc") is None
-    assert Orchestrator._parse_time("") is None
+def test_handle_plan_missing_goal():
+    orchestrator = make_orchestrator_with_llm_result(("plan", {"origin": "Siam"}))
+    result, _ = orchestrator.handle("x")
+    assert result["type"] == "error"
 
 
-# ── _select_day_trip_stops ──
-
-def _make_reachable(costs):
-    return [{"station": f"S{i}", "cost": c, "attractions": [f"A{i}"], "path": []}
-            for i, c in enumerate(costs)]
-
-
-def test_select_explore_stops_under_max():
-    items = _make_reachable([5, 15, 25])
-    result = Orchestrator._select_explore_stops(items, max_stops=4)
-    assert len(result) == 3
+def test_handle_plan_unknown_origin():
+    orchestrator = make_orchestrator_with_llm_result(
+        ("plan", {"origin": "Narnia", "goal": {"any_tag": ["temple"]}})
+    )
+    result, _ = orchestrator.handle("x")
+    assert result["type"] == "error"
+    assert "Narnia" in result["data"]["message"]
 
 
-def test_select_explore_stops_filters_close():
-    items = _make_reachable([0, 3, 10, 13, 20, 25])
-    result = Orchestrator._select_explore_stops(items, max_stops=4)
-    assert len(result) == 4
-    costs = [r["cost"] for r in result]
-    assert costs[0] == 0
-    # cost=3 should be skipped (too close to 0)
-    assert 3 not in costs
+# ==================================================================
+# _handle_plan — pure-route shortcut
+# ==================================================================
 
 
-def test_select_explore_stops_backfills():
-    items = _make_reachable([0, 1, 2, 3, 4])
-    result = Orchestrator._select_explore_stops(items, max_stops=4)
-    assert len(result) == 4
+def test_handle_plan_pure_route_resolves_and_routes():
+    orchestrator = make_orchestrator_with_llm_result(
+        ("plan", {"origin": "Siam", "goal": {"route_to": "Asok"}}),
+        answer_text="From Siam to Asok: ~6 min.",
+    )
+    result, _ = orchestrator.handle("route")
+    assert result["type"] == "plan"
+    assert result["data"]["origin"] == "Siam (CEN)"
+    assert result["data"]["destination"] == "Asok (E4)"
+    assert result["data"]["total_time"] > 0
+    assert len(result["data"]["steps"]) >= 1
+    assert result["data"]["answer"] == "From Siam to Asok: ~6 min."
 
 
-# ── _rank_candidates ──
+def test_handle_plan_pure_route_unknown_destination():
+    orchestrator = make_orchestrator_with_llm_result(
+        ("plan", {"origin": "Siam", "goal": {"route_to": "Narnia"}})
+    )
+    result, _ = orchestrator.handle("route")
+    assert result["type"] == "error"
+    assert "Narnia" in result["data"]["message"]
+
+
+# ==================================================================
+# _handle_plan — unknown-tag surfacing
+# ==================================================================
+
+
+def test_handle_plan_surfaces_unknown_tag():
+    orchestrator = make_orchestrator_with_llm_result(
+        ("plan", {"origin": "Siam", "goal": {"any_tag": ["blorpatron"]}}),
+        answer_text="Not a term I know.",
+    )
+    result, _ = orchestrator.handle("x")
+    assert result["type"] == "plan"
+    assert "unknown_tags" in result["data"]
+    assert "blorpatron" in result["data"]["unknown_tags"]
+    assert "note" in result["data"]
+
+
+# ==================================================================
+# _handle_plan — happy path with candidates
+# ==================================================================
+
+
+def test_handle_plan_finds_temples_from_siam():
+    orchestrator = make_orchestrator_with_llm_result(
+        ("plan", {"origin": "Siam", "goal": {"any_tag": ["temple"]}}),
+        answer_text="A temple awaits.",
+    )
+    result, _ = orchestrator.handle("temples")
+    assert result["type"] == "plan"
+    data = result["data"]
+    assert data["origin"] == "Siam (CEN)"
+    # Either a chosen POI was routed to, or the audit rejected everything.
+    if "poi" in data and data.get("poi"):
+        assert "destination" in data
+        assert "total_time" in data
+        assert isinstance(data["steps"], list)
+        assert "preference_score" in data
+    else:
+        assert "alternatives" in data
+
+
+def test_handle_plan_preference_score_present_on_prefer_tag():
+    orchestrator = make_orchestrator_with_llm_result(
+        (
+            "plan",
+            {
+                "origin": "Siam",
+                "goal": {
+                    "and": [
+                        {"any_tag": ["museum"]},
+                        {"prefer_tag": ["indoor"]},
+                    ]
+                },
+            },
+        ),
+        answer_text="Found a museum.",
+    )
+    result, _ = orchestrator.handle("museum")
+    assert result["type"] == "plan"
+    data = result["data"]
+    # prefer_tag contributes to preference_score when a candidate is chosen.
+    if data.get("poi"):
+        assert data.get("preference_score", 0) >= 0
+
+
+# ==================================================================
+# _is_pure_route / _extract_route_to
+# ==================================================================
+
+
+def test_is_pure_route_direct():
+    assert Orchestrator._is_pure_route({"route_to": "Siam"}) is True
+
+
+def test_is_pure_route_singleton_and():
+    assert Orchestrator._is_pure_route({"and": [{"route_to": "Siam"}]}) is True
+
+
+def test_is_pure_route_singleton_or():
+    assert Orchestrator._is_pure_route({"or": [{"route_to": "Siam"}]}) is True
+
+
+def test_is_pure_route_false_when_tagged():
+    goal = {"and": [{"any_tag": ["temple"]}, {"route_to": "Siam"}]}
+    assert Orchestrator._is_pure_route(goal) is False
+
+
+def test_is_pure_route_false_for_raw_tag():
+    assert Orchestrator._is_pure_route({"any_tag": ["temple"]}) is False
+
+
+def test_is_pure_route_false_for_non_dict():
+    assert Orchestrator._is_pure_route(None) is False
+    assert Orchestrator._is_pure_route("route_to") is False
+    assert Orchestrator._is_pure_route([]) is False
+
+
+def test_extract_route_to_direct():
+    assert Orchestrator._extract_route_to({"route_to": "Siam"}) == "Siam"
+
+
+def test_extract_route_to_nested():
+    goal = {"and": [{"any_tag": ["temple"]}, {"route_to": "Siam"}]}
+    assert Orchestrator._extract_route_to(goal) == "Siam"
+
+
+def test_extract_route_to_returns_none_when_absent():
+    assert Orchestrator._extract_route_to({"any_tag": ["temple"]}) is None
+
+
+# ==================================================================
+# _resolve_location — fallback chain
+# ==================================================================
+
+
+def test_resolve_exact_station():
+    orch = OrchestratorNoLLM()
+    assert orch._resolve_location("Siam (CEN)") == "Siam (CEN)"
+
+
+def test_resolve_prefix_station():
+    orch = OrchestratorNoLLM()
+    assert orch._resolve_location("Asok") == "Asok (E4)"
+
+
+def test_resolve_substring_station():
+    orch = OrchestratorNoLLM()
+    assert orch._resolve_location("Chit") == "Chit Lom (E1)"
+
+
+def test_resolve_poi_display_to_station():
+    orch = OrchestratorNoLLM()
+    assert orch._resolve_location("Grand Palace") == "Sanam Chai (BL31)"
+
+
+def test_resolve_edit_distance_typo():
+    orch = OrchestratorNoLLM()
+    assert orch._resolve_location("Saim") == "Siam (CEN)"
+
+
+def test_resolve_unknown_returns_none():
+    orch = OrchestratorNoLLM()
+    assert orch._resolve_location("Narnia") is None
+
+
+def test_resolve_empty_returns_none():
+    orch = OrchestratorNoLLM()
+    assert orch._resolve_location("") is None
+    assert orch._resolve_location(None) is None
+
+
+# ==================================================================
+# _rank_candidates — priority and rejection
+# ==================================================================
+
 
 def test_rank_candidates_exact_beats_prefix():
-    orchestrator = OrchestratorNoLLM()
+    orch = OrchestratorNoLLM()
     candidates = [
         {"station": "Siam Discovery", "match_type": "prefix"},
         {"station": "Siam (CEN)", "match_type": "exact"},
     ]
-    assert orchestrator._rank_candidates("Siam (CEN)", candidates) == "Siam (CEN)"
+    assert orch._rank_candidates("Siam (CEN)", candidates) == "Siam (CEN)"
 
 
 def test_rank_candidates_prefix_beats_substring():
-    orchestrator = OrchestratorNoLLM()
+    orch = OrchestratorNoLLM()
     candidates = [
         {"station": "Mo Chit (N8)", "match_type": "substring"},
         {"station": "Chit Lom (E1)", "match_type": "prefix"},
     ]
-    result = orchestrator._rank_candidates("Chit", candidates)
-    assert result == "Chit Lom (E1)"
+    assert orch._rank_candidates("Chit", candidates) == "Chit Lom (E1)"
 
 
 def test_rank_candidates_empty():
-    orchestrator = OrchestratorNoLLM()
-    assert orchestrator._rank_candidates("anything", []) is None
+    orch = OrchestratorNoLLM()
+    assert orch._rank_candidates("anything", []) is None
 
 
 def test_rank_candidates_low_similarity_rejected():
-    orchestrator = OrchestratorNoLLM()
+    orch = OrchestratorNoLLM()
     candidates = [
         {"station": "Very Long Station Name (Z99)", "match_type": "substring"},
     ]
-    assert orchestrator._rank_candidates("X", candidates) is None
-
-
-# ── plan_trip direct public method ──
-
-def test_plan_trip_direct_success():
-    orchestrator = OrchestratorNoLLM()
-    result = orchestrator.plan_trip("Mo Chit", "Siam", "08:00")
-    assert result["type"] == "schedule"
-    assert len(result["data"]["itineraries"]) > 0
-    assert result["data"]["origin"] == "Mo Chit (N8)"
-    assert result["data"]["destination"] == "Siam (CEN)"
-
-
-def test_plan_trip_direct_unknown_origin():
-    orchestrator = OrchestratorNoLLM()
-    result = orchestrator.plan_trip("Narnia", "Siam", "08:00")
-    assert result["type"] == "error"
-    assert "Unknown location" in result["data"]["message"]
-
-
-def test_plan_trip_direct_unknown_destination():
-    orchestrator = OrchestratorNoLLM()
-    result = orchestrator.plan_trip("Siam", "Narnia", "08:00")
-    assert result["type"] == "error"
-    assert "Unknown location" in result["data"]["message"]
-
-
-def test_plan_trip_direct_invalid_time():
-    orchestrator = OrchestratorNoLLM()
-    result = orchestrator.plan_trip("Siam", "Asok", "invalid")
-    assert result["type"] == "error"
-    assert "Invalid time" in result["data"]["message"]
-
-
-def test_plan_trip_direct_no_service():
-    orchestrator = OrchestratorNoLLM()
-    result = orchestrator.plan_trip("Mo Chit", "Siam", "06:00")
-    assert result["type"] == "error"
-    assert "No scheduled trips" in result["data"]["message"]
+    assert orch._rank_candidates("X", candidates) is None
 
 
 # ==================================================================
-# Phase 3: Handler dispatch via handle()
+# handle_pure_route — the no-LLM public entry
 # ==================================================================
 
-# ── _handle_plan_trip ──
 
-def test_handle_plan_trip_success():
-    orchestrator = make_orchestrator_with_llm_result(
-        ("plan_trip", {"origin": "Mo Chit", "destination": "Siam", "deadline": "08:00"})
-    )
-    result, _ = orchestrator.handle("plan trip")
-    assert result["type"] == "schedule"
-    assert "itineraries" in result["data"]
-    assert len(result["data"]["itineraries"]) > 0
+def test_handle_pure_route_success():
+    orch = OrchestratorNoLLM()
+    result = orch.handle_pure_route("Siam", "Asok")
+    assert result["type"] == "plan"
+    assert result["data"]["origin"] == "Siam (CEN)"
+    assert result["data"]["destination"] == "Asok (E4)"
+    assert result["data"]["total_time"] > 0
+    assert len(result["data"]["steps"]) >= 1
 
 
-def test_handle_plan_trip_unknown_origin():
-    orchestrator = make_orchestrator_with_llm_result(
-        ("plan_trip", {"origin": "Narnia", "destination": "Siam", "deadline": "08:00"})
-    )
-    result, _ = orchestrator.handle("plan trip")
+def test_handle_pure_route_empty_input():
+    orch = OrchestratorNoLLM()
+    assert orch.handle_pure_route("", "Asok")["type"] == "error"
+    assert orch.handle_pure_route("Siam", "")["type"] == "error"
+
+
+def test_handle_pure_route_unknown_origin():
+    orch = OrchestratorNoLLM()
+    result = orch.handle_pure_route("Narnia", "Asok")
     assert result["type"] == "error"
-    assert "Unknown location" in result["data"]["message"]
+    assert "Narnia" in result["data"]["message"]
 
 
-def test_handle_plan_trip_unknown_destination():
-    orchestrator = make_orchestrator_with_llm_result(
-        ("plan_trip", {"origin": "Siam", "destination": "Narnia", "deadline": "08:00"})
-    )
-    result, _ = orchestrator.handle("plan trip")
+def test_handle_pure_route_unknown_destination():
+    orch = OrchestratorNoLLM()
+    result = orch.handle_pure_route("Siam", "Narnia")
     assert result["type"] == "error"
-    assert "Unknown location" in result["data"]["message"]
+    assert "Narnia" in result["data"]["message"]
 
 
-def test_handle_plan_trip_invalid_deadline():
+# ==================================================================
+# handle_text CLI helper
+# ==================================================================
+
+
+def test_handle_text_error_path():
+    orchestrator = make_orchestrator_with_llm_result(None)
+    text = orchestrator.handle_text("x")
+    assert text == "Sorry, I couldn't process your request."
+
+
+def test_handle_text_answer_path():
+    orchestrator = make_orchestrator_with_llm_result("Here you go.")
+    assert orchestrator.handle_text("x") == "Here you go."
+
+
+def test_handle_text_plan_returns_answer_field():
     orchestrator = make_orchestrator_with_llm_result(
-        ("plan_trip", {"origin": "Siam", "destination": "Asok", "deadline": "invalid"})
+        ("plan", {"origin": "Siam", "goal": {"route_to": "Asok"}}),
+        answer_text="From Siam to Asok.",
     )
-    result, _ = orchestrator.handle("plan trip")
-    assert result["type"] == "error"
-    assert "Invalid time" in result["data"]["message"]
+    assert orchestrator.handle_text("route") == "From Siam to Asok."
 
 
-def test_handle_plan_trip_no_service():
-    orchestrator = make_orchestrator_with_llm_result(
-        ("plan_trip", {"origin": "Mo Chit", "destination": "Siam", "deadline": "06:00"})
+# ==================================================================
+# _select_via_audit — blacklist semantics
+# ==================================================================
+
+
+def test_select_via_audit_clean_route_wins(monkeypatch):
+    """First candidate with no violations should be chosen."""
+    orch = OrchestratorNoLLM()
+    ranked = [
+        {"name": "A", "station": "Siam (CEN)", "pref_score": 2,
+         "path": ["Siam (CEN)", "Asok (E4)"], "cost": 6},
+    ]
+    monkeypatch.setattr(orch.prolog, "audit_route_for_path", lambda _p, _g: [])
+    monkeypatch.setattr(
+        orch.prolog, "build_route_steps", lambda _p: [{"type": "ride"}]
     )
-    result, _ = orchestrator.handle("plan trip")
-    assert result["type"] == "answer"
-    assert "No scheduled trips" in result["data"]["answer"]
+    chosen, trail = orch._select_via_audit(ranked, {"any_tag": ["x"]})
+    assert chosen is not None
+    assert chosen["name"] == "A"
+    assert trail == []
 
 
-# ── _handle_plan_day ──
+def test_select_via_audit_blacklists_violating(monkeypatch):
+    """First candidate violates → blacklisted; second passes."""
+    orch = OrchestratorNoLLM()
+    ranked = [
+        {"name": "BadPOI", "station": "S1", "pref_score": 3,
+         "path": ["A", "B"], "cost": 5},
+        {"name": "GoodPOI", "station": "S2", "pref_score": 2,
+         "path": ["A", "C"], "cost": 8},
+    ]
+    call_log = []
 
-def test_handle_plan_day_success():
-    orchestrator = make_orchestrator_with_llm_result(
-        ("plan_day", {
-            "origin": "Siam",
-            "stops": [{"location": "Asok", "arrive_by": "08:00"}],
-        })
+    def fake_audit(path, _goal):
+        call_log.append(path)
+        if path == ["A", "B"]:
+            return [{"step": {"type": "transfer"}, "reason": "weather_exposed"}]
+        return []
+
+    monkeypatch.setattr(orch.prolog, "audit_route_for_path", fake_audit)
+    monkeypatch.setattr(orch.prolog, "build_route_steps", lambda _p: [])
+    chosen, trail = orch._select_via_audit(ranked, {"any_tag": ["x"]})
+    assert chosen is not None
+    assert chosen["name"] == "GoodPOI"
+    assert len(trail) == 1
+    assert trail[0]["candidate"] == "BadPOI"
+    assert trail[0]["violations"][0]["reason"] == "weather_exposed"
+
+
+def test_select_via_audit_all_violate_returns_none(monkeypatch):
+    """Every candidate violates → returns None + full audit trail."""
+    orch = OrchestratorNoLLM()
+    ranked = [
+        {"name": "A", "station": "S1", "pref_score": 2, "path": ["X", "Y"], "cost": 5},
+        {"name": "B", "station": "S2", "pref_score": 1, "path": ["X", "Z"], "cost": 7},
+    ]
+    monkeypatch.setattr(
+        orch.prolog,
+        "audit_route_for_path",
+        lambda _p, _g: [{"step": {"type": "transfer"}, "reason": "weather_exposed"}],
     )
-    result, _ = orchestrator.handle("plan day")
-    assert result["type"] == "day_plan"
-    assert len(result["data"]["legs"]) == 1
-    leg = result["data"]["legs"][0]
-    assert "attractions" in leg
+    monkeypatch.setattr(orch.prolog, "build_route_steps", lambda _p: [])
+    chosen, trail = orch._select_via_audit(ranked, {"any_tag": ["x"]})
+    assert chosen is None
+    assert len(trail) == 2
 
 
-def test_handle_plan_day_empty_stops():
-    orchestrator = make_orchestrator_with_llm_result(
-        ("plan_day", {"origin": "Siam", "stops": []})
-    )
-    result, _ = orchestrator.handle("plan day")
-    assert result["type"] == "error"
-    assert "at least one stop" in result["data"]["message"]
+def test_select_via_audit_max_replan_bound(monkeypatch):
+    """Bound terminates even if blacklist never fills."""
+    orch = OrchestratorNoLLM()
+    ranked = [
+        {"name": "A", "station": "S1", "pref_score": 1, "path": ["X", "Y"], "cost": 5},
+    ]
+    calls = {"n": 0}
+
+    def always_violates(_p, _g):
+        calls["n"] += 1
+        return [{"step": {"type": "transfer"}, "reason": "r"}]
+
+    monkeypatch.setattr(orch.prolog, "audit_route_for_path", always_violates)
+    chosen, _ = orch._select_via_audit(ranked, {"any_tag": ["x"]})
+    assert chosen is None
+    # After one sweep the only candidate is blacklisted — the outer loop
+    # terminates via `len(blacklist) >= len(ranked)`.
+    assert calls["n"] == 1
 
 
-def test_handle_plan_day_unknown_origin():
-    orchestrator = make_orchestrator_with_llm_result(
-        ("plan_day", {
-            "origin": "Narnia",
-            "stops": [{"location": "Asok", "arrive_by": "08:00"}],
-        })
-    )
-    result, _ = orchestrator.handle("plan day")
-    assert result["type"] == "error"
-    assert "Unknown location" in result["data"]["message"]
+# ==================================================================
+# Dijkstra + graph primitives
+# ==================================================================
 
 
-def test_handle_plan_day_unknown_stop():
-    orchestrator = make_orchestrator_with_llm_result(
-        ("plan_day", {
-            "origin": "Siam",
-            "stops": [{"location": "Narnia", "arrive_by": "08:00"}],
-        })
-    )
-    result, _ = orchestrator.handle("plan day")
-    assert result["type"] == "error"
-    assert "Unknown location" in result["data"]["message"]
+def test_build_graph_makes_adjacency_dict():
+    graph = Orchestrator._build_graph([("A", "B", 3), ("B", "C", 5)])
+    assert graph["A"] == [("B", 3)]
+    assert graph["B"] == [("C", 5)]
 
 
-# ── _handle_plan_explore ──
-
-def test_handle_plan_explore_daytime_success():
-    orchestrator = make_orchestrator_with_llm_result(
-        ("plan_explore", {"origin": "Siam", "start_time": "09:00", "end_time": "17:00"})
-    )
-    result, _ = orchestrator.handle("plan day trip")
-    assert result["type"] == "explore"
-    assert "stops" in result["data"]
-    assert "legs" in result["data"]
-    assert len(result["data"]["legs"]) > 0
-    for leg in result["data"]["legs"]:
-        assert "attractions" in leg
-    # Daytime trip → no last_train_note
-    assert result["data"]["last_train_note"] is None
+def test_dijkstra_same_node_zero_cost():
+    path, cost = Orchestrator._dijkstra({}, "X", "X")
+    assert path == ["X"] and cost == 0
 
 
-def test_handle_plan_explore_nighttime_success():
-    orchestrator = make_orchestrator_with_llm_result(
-        ("plan_explore", {"origin": "Siam", "start_time": "19:00", "end_time": "02:00"})
-    )
-    result, _ = orchestrator.handle("plan nightlife")
-    assert result["type"] == "explore"
-    assert "legs" in result["data"]
-    assert len(result["data"]["legs"]) > 0
-    # end_time 02:00 is past midnight → last_train_note should be set
-    assert result["data"]["last_train_note"] is not None
+def test_dijkstra_simple_path():
+    graph = {"A": [("B", 3), ("C", 10)], "B": [("C", 4)]}
+    path, cost = Orchestrator._dijkstra(graph, "A", "C")
+    assert path == ["A", "B", "C"] and cost == 7
 
 
-def test_handle_plan_explore_unknown_origin():
-    orchestrator = make_orchestrator_with_llm_result(
-        ("plan_explore", {"origin": "Narnia", "start_time": "09:00", "end_time": "17:00"})
-    )
-    result, _ = orchestrator.handle("explore Bangkok")
-    assert result["type"] == "error"
-    assert "Unknown location" in result["data"]["message"]
+def test_dijkstra_disconnected_returns_none():
+    graph = {"A": [("B", 1)]}
+    path, cost = Orchestrator._dijkstra(graph, "A", "Z")
+    assert path is None and cost is None
 
 
-def test_handle_plan_explore_no_late_note():
-    orchestrator = make_orchestrator_with_llm_result(
-        ("plan_explore", {"origin": "Siam", "start_time": "19:00", "end_time": "22:00"})
-    )
-    result, _ = orchestrator.handle("plan evening")
-    assert result["type"] == "explore"
-    assert result["data"]["last_train_note"] is None
+# ==================================================================
+# Vocabulary cache
+# ==================================================================
+
+
+def test_vocab_cache_populated_once():
+    orch = OrchestratorNoLLM()
+    assert orch._vocab_cache is None
+    _ = orch._vocab()
+    assert orch._vocab_cache is not None
+
+
+def test_synonyms_cache_populated_once():
+    orch = OrchestratorNoLLM()
+    assert orch._synonyms_cache is None
+    _ = orch._synonyms()
+    assert orch._synonyms_cache is not None

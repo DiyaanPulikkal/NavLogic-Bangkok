@@ -1,10 +1,28 @@
+"""
+prolog.py — pyswip wrapper.
+
+Responsibilities (in order of importance):
+
+  1. Goal serialization: turn the recursive-dict goal that the LLM emits
+     into a Prolog term string for the rulebook to evaluate. This is the
+     ONE place where the open vocabulary crosses into Prolog syntax.
+  2. Logical-form queries: candidates/unknown_tags/relax/audit on top of
+     rules.pl, returning JSON-shaped Python.
+  3. Surface helpers: name matching, edge enumeration, symbolic route
+     segmentation, vocabulary export for the LLM system prompt.
+
+The wrapper does no reasoning of its own — it serializes, queries, and
+parses results. All inference lives in the .pl files.
+"""
+
+from __future__ import annotations
+
 import logging
 import os
 import re
 from itertools import islice
 
 # Homebrew SWI-Prolog may install libs outside pyswip's default search path.
-# Set LIBSWIPL_PATH and SWI_HOME_DIR so pyswip can locate libswipl.
 if not os.environ.get("LIBSWIPL_PATH") or not os.environ.get("SWI_HOME_DIR"):
     import glob as _glob
 
@@ -20,124 +38,286 @@ from pyswip import Prolog
 logger = logging.getLogger("prolog")
 
 KB_PATH = os.path.join(os.path.dirname(__file__), "knowledge_base.pl")
-SCHEDULE_PATH = os.path.join(os.path.dirname(__file__), "schedule.pl")
 
-SCHEDULE_QUERY_TIMEOUT = 10  # seconds — prevents runaway Prolog searches
+
+class GoalShapeError(ValueError):
+    """Raised when a dict goal cannot be serialized to a Prolog term."""
 
 
 class PrologInterface:
+    GOAL_OPS_LIST = {"and", "or"}
+    GOAL_OPS_TAGLIST = {"any_tag", "all_tag", "none_tag", "prefer_tag"}
+    GOAL_OPS_SINGLE = {"not"}
+    GOAL_OPS_ATOM = {"route_to"}
+
     def __init__(self):
         self.prolog = Prolog()
         self.prolog.consult(KB_PATH)
-        self.prolog.consult(SCHEDULE_PATH)
 
-    def is_valid_query(self, query):
-        pattern = r'^[a-zA-Z_][a-zA-Z0-9_]*\((.*)\)\.$'
-        return re.match(pattern, query) is not None
+    # ------------------------------------------------------------------
+    # Name resolution (symbolic classification only; ranking in Python).
+    # ------------------------------------------------------------------
 
-    def query(self, query):
-        if self.is_valid_query(query):
-            try:
-                logger.info("Executing Prolog query: %s", query)
-                result = list(self.prolog.query(query[:-1]))
-                logger.info("Prolog returned %d result(s)", len(result))
-                return result
-            except Exception as e:
-                logger.error("Error executing query: %s", e)
-                return f"Error executing query: {e}"
+    def match_station_classified(self, name: str) -> list[dict]:
+        """Return [{station, match_type}, ...] via match_station/3.
 
-    def get_all_edges(self):
-        """Return all bidirectional edges as (station_a, station_b, time) tuples."""
-        logger.info("Executing Prolog query: edge(A, B, T)")
-        edges = [
-            (str(r['A']), str(r['B']), int(r['T']))
+        match_type ∈ {exact, prefix, substring}; deduplicated across lines.
+        """
+        safe_name = name.replace("'", "\\'")
+        query = f"match_station('{safe_name}', Station, MatchType)"
+        logger.info("Executing Prolog query: %s", query)
+        seen, out = set(), []
+        for r in self.prolog.query(query):
+            station = str(r["Station"])
+            if station in seen:
+                continue
+            seen.add(station)
+            out.append({"station": station, "match_type": str(r["MatchType"])})
+        return out
+
+    def is_valid_station(self, name: str) -> bool:
+        safe_name = name.replace("'", "\\'")
+        return bool(list(islice(self.prolog.query(f"valid_station('{safe_name}')"), 1)))
+
+    def get_all_station_names(self) -> list[str]:
+        return sorted({str(r["S"]) for r in self.prolog.query("station(S, _)")})
+
+    def get_stations_with_lines(self) -> list[dict]:
+        """Return [{name, lines}, ...] grouped from station/2 facts."""
+        by_station: dict[str, set[str]] = {}
+        for r in self.prolog.query("station(S, L)"):
+            by_station.setdefault(str(r["S"]), set()).add(str(r["L"]))
+        return [
+            {"name": name, "lines": sorted(lines)}
+            for name, lines in sorted(by_station.items())
+        ]
+
+    def get_all_pois(self) -> list[dict]:
+        """Return [{name, station, tags}, ...] joining poi/3 with tagged/2."""
+        out: list[dict] = []
+        seen: set[str] = set()
+        for r in self.prolog.query("poi(Id, Name, Station), tagged(Id, Tags)"):
+            pid = str(r["Id"])
+            if pid in seen:
+                continue
+            seen.add(pid)
+            out.append({
+                "name": str(r["Name"]),
+                "station": str(r["Station"]),
+                "tags": [str(t) for t in r["Tags"]],
+            })
+        out.sort(key=lambda p: p["name"])
+        return out
+
+    # ------------------------------------------------------------------
+    # Graph (consumed by Python's Dijkstra).
+    # ------------------------------------------------------------------
+
+    def get_all_edges(self) -> list[tuple[str, str, int]]:
+        """Bidirectional edges (A, B, time_minutes)."""
+        return [
+            (str(r["A"]), str(r["B"]), int(r["T"]))
             for r in self.prolog.query("edge(A, B, T)")
         ]
-        logger.info("Prolog returned %d result(s)", len(edges))
-        return edges
-
-    def get_station_lines(self):
-        """Return a dict mapping each station name to its list of lines."""
-        logger.info("Executing Prolog query: station(S, L)")
-        mapping = {}
-        count = 0
-        for r in self.prolog.query("station(S, L)"):
-            mapping.setdefault(str(r['S']), []).append(str(r['L']))
-            count += 1
-        logger.info("Prolog returned %d result(s)", count)
-        return mapping
-
-    def resolve_location(self, name):
-        """Resolve a location name (attraction or station) to a station name via Prolog."""
-        logger.info("Resolving location: %s", name)
-        results = list(self.prolog.query(f"resolve_location('{name}', Station)"))
-        if results:
-            station = str(results[0]['Station'])
-            logger.info("Resolved '%s' → '%s'", name, station)
-            return station
-        logger.info("Could not resolve location: %s", name)
-        return None
-
-    def is_valid_station(self, name):
-        """Check if a station name exists in the network."""
-        results = list(self.prolog.query(f"valid_station('{name}')"))
-        return len(results) > 0
-
-    def get_all_station_names(self):
-        """Return a list of all station names in the network."""
-        return list({str(r['S']) for r in self.prolog.query("station(S, _)")})
 
     # ------------------------------------------------------------------
-    # New methods delegating reasoning to Prolog rules (rules.pl)
+    # Symbolic route segmentation (route_steps/2).
     # ------------------------------------------------------------------
 
-    def build_route_steps(self, path_list: list) -> list:
-        """Call route_steps/2 in Prolog and parse the result into Python dicts."""
-        if len(path_list) < 2:
+    def build_route_steps(self, path: list[str]) -> list[dict]:
+        """Group a station path into ride + transfer step dicts."""
+        if len(path) < 2:
             return []
-
-        prolog_list = "[" + ", ".join(f"'{s}'" for s in path_list) + "]"
-        query = f"route_steps({prolog_list}, Steps)"
+        path_term = "[" + ",".join(self._quote_atom(s) for s in path) + "]"
+        query = f"route_steps({path_term}, Steps)"
         logger.info("Executing Prolog query: %s", query)
-
         results = list(self.prolog.query(query))
         if not results:
             return []
+        return [self._step_term_to_dict(s) for s in results[0]["Steps"]]
 
-        raw_steps = results[0]['Steps']
-        return self._parse_route_steps(raw_steps)
+    # ------------------------------------------------------------------
+    # Vocabulary surface (fed to the LLM system prompt each call).
+    # ------------------------------------------------------------------
 
-    def _parse_route_steps(self, steps_term) -> list:
-        """Convert Prolog step terms (serialized as strings by pyswip) into Python dicts."""
-        parsed = []
-        for step in steps_term:
-            s = str(step)
-            if s.startswith('ride('):
-                parsed.append(self._parse_ride_step(s))
-            elif s.startswith('transfer('):
-                inner = s[len('transfer('):-1]
-                parts = self._split_top_level(inner)
-                parsed.append({
-                    "type": "transfer",
-                    "from": parts[0].strip(),
-                    "to": parts[1].strip(),
-                })
-        return parsed
+    def active_tag_vocabulary(self) -> list[str]:
+        """Canonical tags the LLM can emit.
+
+        Union of (a) tags actually attached to POIs, (b) synonym targets,
+        (c) supertypes from subtag/2. Deduplicated and sorted so the LLM
+        sees a stable ordering across calls.
+        """
+        tags: set[str] = set()
+        for r in self.prolog.query("tagged(_, Tags)"):
+            tags.update(str(t) for t in r["Tags"])
+        for r in self.prolog.query("synonym(_, T)"):
+            tags.add(str(r["T"]))
+        for r in self.prolog.query("subtag(_, T)"):
+            tags.add(str(r["T"]))
+        for r in self.prolog.query("subtag(T, _)"):
+            tags.add(str(r["T"]))
+        return sorted(tags)
+
+    def active_synonyms(self) -> dict[str, str]:
+        """Raw → canonical mapping (open-vocabulary surface for the LLM)."""
+        out: dict[str, str] = {}
+        for r in self.prolog.query("synonym(Raw, Canon)"):
+            out[str(r["Raw"])] = str(r["Canon"])
+        return out
+
+    # ------------------------------------------------------------------
+    # Logical-form queries (the open-vocabulary core).
+    # ------------------------------------------------------------------
+
+    def candidates(self, goal: dict) -> list[dict]:
+        """POIs satisfying `goal`, each with its preference score.
+
+        Inlines the findall as a direct conjunctive query so we get
+        bound variables (Id, Name, Station, Score) without parsing
+        Prolog list/pair terms.
+        """
+        goal_term = self._goal_to_prolog(goal)
+        query = (
+            f"poi(Id, Name, Station), "
+            f"satisfies(Id, {goal_term}), "
+            f"preference_score(Id, {goal_term}, Score)"
+        )
+        logger.info("Executing Prolog query: %s", query)
+        seen, out = set(), []
+        for r in self.prolog.query(query):
+            pid = str(r["Id"])
+            if pid in seen:
+                continue
+            seen.add(pid)
+            out.append({
+                "id": pid,
+                "name": str(r["Name"]),
+                "station": str(r["Station"]),
+                "pref_score": int(r["Score"]),
+            })
+        return out
+
+    def unknown_tags(self, goal: dict) -> list[str]:
+        """Tags in `goal` that bind to unknown(_) — i.e. neither a synonym
+        nor a recognized canonical tag. Empty list means vocabulary is fine.
+        """
+        goal_term = self._goal_to_prolog(goal)
+        query = f"unknown_tags({goal_term}, Unknowns)"
+        logger.info("Executing Prolog query: %s", query)
+        results = list(self.prolog.query(query))
+        if not results:
+            return []
+        return [str(t) for t in results[0]["Unknowns"]]
+
+    def relax(self, goal: dict) -> tuple[list[str], list[dict]] | None:
+        """Minimal-drop relaxation when `candidates(goal)` is empty.
+
+        Returns (dropped_subgoal_strings, survivor_candidates) or None.
+        Dropped subgoals come back as Prolog term strings (e.g.
+        "none_tag([weather_exposed])"); the LLM narrates them in plain
+        English using the system-prompt formatting instructions.
+        """
+        goal_term = self._goal_to_prolog(goal)
+        query = f"relax({goal_term}, Drop, Survivors)"
+        logger.info("Executing Prolog query: %s", query)
+        results = list(islice(self.prolog.query(query), 1))
+        if not results:
+            return None
+        dropped = [str(d) for d in results[0]["Drop"]]
+        survivors = self._parse_candidate_pairs(results[0]["Survivors"])
+        return (dropped, survivors)
+
+    def audit_route_for_path(self, path: list[str], goal: dict) -> list[dict]:
+        """Audit a path against `goal`'s hard constraints.
+
+        Composes route_steps/2 + audit_route/3 in one query. Returns
+        [{step, reason}, ...] — empty when the route is clean.
+        """
+        if len(path) < 2:
+            return []
+        goal_term = self._goal_to_prolog(goal)
+        path_term = "[" + ",".join(self._quote_atom(s) for s in path) + "]"
+        query = (
+            f"route_steps({path_term}, Steps), "
+            f"audit_route(Steps, {goal_term}, Violations)"
+        )
+        logger.info("Executing Prolog query: %s", query)
+        results = list(self.prolog.query(query))
+        if not results:
+            return []
+        out = []
+        for v in results[0]["Violations"]:
+            parsed = self._parse_violation(str(v))
+            if parsed is not None:
+                out.append(parsed)
+        return out
+
+    # ------------------------------------------------------------------
+    # Goal → Prolog term serialization (the open→closed bridge).
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def _goal_to_prolog(cls, goal: dict) -> str:
+        if not isinstance(goal, dict) or len(goal) != 1:
+            raise GoalShapeError(
+                f"Goal must be a single-key dict, got: {goal!r}"
+            )
+        op, arg = next(iter(goal.items()))
+        if op in cls.GOAL_OPS_LIST:
+            if not isinstance(arg, list):
+                raise GoalShapeError(f"{op} requires a list of subgoals")
+            sub = ",".join(cls._goal_to_prolog(g) for g in arg)
+            return f"{op}([{sub}])"
+        if op in cls.GOAL_OPS_SINGLE:
+            return f"{op}({cls._goal_to_prolog(arg)})"
+        if op in cls.GOAL_OPS_TAGLIST:
+            if not isinstance(arg, list):
+                raise GoalShapeError(f"{op} requires a list of tag strings")
+            tags = ",".join(cls._quote_atom(t) for t in arg)
+            return f"{op}([{tags}])"
+        if op in cls.GOAL_OPS_ATOM:
+            return f"{op}({cls._quote_atom(arg)})"
+        raise GoalShapeError(f"Unknown goal operator: {op!r}")
+
+    @staticmethod
+    def _quote_atom(s) -> str:
+        """Quote a Python string as a Prolog atom (single-quoted)."""
+        safe = str(s).replace("\\", "\\\\").replace("'", "\\'")
+        return f"'{safe}'"
+
+    # ------------------------------------------------------------------
+    # Result parsing helpers.
+    # ------------------------------------------------------------------
+
+    def _step_term_to_dict(self, step) -> dict:
+        s = str(step)
+        if s.startswith("ride("):
+            return self._parse_ride_step(s)
+        if s.startswith("transfer("):
+            inner = s[len("transfer(") : -1]
+            parts = self._split_top_level(inner)
+            return {
+                "type": "transfer",
+                "from": parts[0].strip(),
+                "to": parts[1].strip(),
+            }
+        return {"type": "unknown", "raw": s}
 
     def _parse_ride_step(self, s: str) -> dict:
-        """Parse a ride(...) string from Prolog."""
-        inner = s[len('ride('):-1]
+        inner = s[len("ride(") : -1]
         parts = self._split_top_level(inner)
         line = parts[0].strip()
         board = parts[1].strip()
         alight = parts[2].strip()
         stations_str = parts[3].strip()
-        # Parse the stations list: ['Station A', 'Station B', ...]
-        if stations_str.startswith('[') and stations_str.endswith(']'):
-            stations_inner = stations_str[1:-1]
-            stations = [st.strip().strip("'") for st in self._split_top_level(stations_inner)]
+        if stations_str.startswith("[") and stations_str.endswith("]"):
+            inner_stations = stations_str[1:-1]
+            stations = [
+                st.strip().strip("'")
+                for st in self._split_top_level(inner_stations)
+            ]
         else:
-            stations = [stations_str]
+            stations = [stations_str.strip("'")]
         return {
             "type": "ride",
             "line": line,
@@ -146,178 +326,85 @@ class PrologInterface:
             "stations": stations,
         }
 
+    def _parse_candidate_pairs(self, raw_list) -> list[dict]:
+        """Parse a Prolog list of `Name-Station-Score` (-/2) terms.
+
+        pyswip serializes the nested -/2 chain in *prefix* operator form:
+        `-(-(Name, Station), Score)`. We peel the outer compound for
+        Score, then the inner for Name and Station. Names may contain
+        spaces and parentheses (e.g. 'Mo Chit (N8)') so we use the
+        bracket-aware splitter rather than a regex.
+        """
+        out, seen = [], set()
+        for item in raw_list:
+            parsed = self._parse_dash_pair(str(item))
+            if parsed is None:
+                continue
+            name, station, score = parsed
+            if name in seen:
+                continue
+            seen.add(name)
+            out.append({"name": name, "station": station, "pref_score": score})
+        return out
+
+    def _parse_dash_pair(self, s: str) -> tuple[str, str, int] | None:
+        """Parse `-(-(Name, Station), Score)` into (name, station, score)."""
+        if not s.startswith("-(") or not s.endswith(")"):
+            return None
+        outer = s[2:-1]
+        outer_parts = self._split_top_level(outer)
+        if len(outer_parts) != 2:
+            return None
+        try:
+            score = int(outer_parts[1].strip())
+        except ValueError:
+            return None
+        inner = outer_parts[0].strip()
+        if not inner.startswith("-(") or not inner.endswith(")"):
+            return None
+        inner_parts = self._split_top_level(inner[2:-1])
+        if len(inner_parts) != 2:
+            return None
+        name = inner_parts[0].strip().strip("'")
+        station = inner_parts[1].strip().strip("'")
+        return (name, station, score)
+
+    def _parse_violation(self, s: str) -> dict | None:
+        """Parse `violation(Step, Reason)` into a dict.
+
+        Step is a transfer(A, B) term (the only kind audit_route emits
+        currently); Reason is an atom like `weather_exposed`.
+        """
+        if not s.startswith("violation("):
+            return None
+        inner = s[len("violation(") : -1]
+        parts = self._split_top_level(inner)
+        if len(parts) != 2:
+            return None
+        step_str = parts[0].strip()
+        reason = parts[1].strip().strip("'")
+        if step_str.startswith("transfer("):
+            step = self._step_term_to_dict(step_str)
+        else:
+            step = {"type": "unknown", "raw": step_str}
+        return {"step": step, "reason": reason}
+
     @staticmethod
-    def _split_top_level(s: str) -> list:
-        """Split a string by commas, respecting parentheses and brackets."""
-        parts = []
-        depth = 0
-        current = []
+    def _split_top_level(s: str) -> list[str]:
+        """Split on commas at bracket-depth zero."""
+        parts, depth, current = [], 0, []
         for ch in s:
-            if ch in ('(', '['):
+            if ch in "([":
                 depth += 1
                 current.append(ch)
-            elif ch in (')', ']'):
+            elif ch in ")]":
                 depth -= 1
                 current.append(ch)
-            elif ch == ',' and depth == 0:
-                parts.append(''.join(current))
+            elif ch == "," and depth == 0:
+                parts.append("".join(current))
                 current = []
             else:
                 current.append(ch)
         if current:
-            parts.append(''.join(current))
+            parts.append("".join(current))
         return parts
-
-    def fuzzy_match_station(self, name: str) -> list:
-        """Call fuzzy_match_station/2 in Prolog to find matching stations."""
-        safe_name = name.replace("'", "\\'")
-        query = f"fuzzy_match_station('{safe_name}', Station)"
-        logger.info("Executing Prolog query: %s", query)
-        results = list(self.prolog.query(query))
-        return list({str(r['Station']) for r in results})
-
-    def match_station_classified(self, name: str) -> list[dict]:
-        """Call match_station/3 in Prolog to get candidates with match type.
-
-        Returns a list of dicts: [{"station": str, "match_type": str}, ...]
-        where match_type is one of: "exact", "prefix", "substring".
-        Prolog handles the classification logic; Python handles ranking.
-        """
-        safe_name = name.replace("'", "\\'")
-        query = f"match_station('{safe_name}', Station, MatchType)"
-        logger.info("Executing Prolog query: %s", query)
-        results = list(self.prolog.query(query))
-        # Deduplicate (a station on multiple lines produces duplicate rows)
-        seen = set()
-        candidates = []
-        for r in results:
-            station = str(r['Station'])
-            if station not in seen:
-                seen.add(station)
-                candidates.append({
-                    "station": station,
-                    "match_type": str(r['MatchType']),
-                })
-        return candidates
-
-    def suggest_transfer_station(self, line_a: str, line_b: str) -> list:
-        """Find interchange stations connecting two lines."""
-        query = f"suggest_transfer_station({line_a}, {line_b}, Transfer)"
-        logger.info("Executing Prolog query: %s", query)
-        results = list(self.prolog.query(query))
-        transfers = []
-        for r in results:
-            t = r['Transfer']
-            if isinstance(t, str):
-                transfers.append({"type": "same_station", "station": t})
-            else:
-                transfers.append({
-                    "type": "walk",
-                    "from": str(t.args[0]),
-                    "to": str(t.args[1]),
-                })
-        return transfers
-
-    def get_line_display_name(self, line_id: str) -> str:
-        """Look up the display name for a line via Prolog."""
-        results = list(self.prolog.query(f"line_display_name({line_id}, Name)"))
-        if results:
-            return str(results[0]['Name'])
-        return line_id
-
-    # ------------------------------------------------------------------
-    # Schedule & Trip Planning (FOL / Resolution)
-    # ------------------------------------------------------------------
-
-    def plan_trip(self, origin: str, destination: str, deadline: int) -> list[dict]:
-        """Query plan_trip/4 and return formatted itineraries.
-
-        Args:
-            origin: Station name (e.g. "Mo Chit (N8)")
-            destination: Station name (e.g. "Siam (CEN)")
-            deadline: Latest arrival time as HHMM integer (e.g. 0800)
-
-        Returns:
-            List of itineraries, each a list of leg dicts.
-        """
-        query = (
-            f"catch("
-            f"call_with_time_limit({SCHEDULE_QUERY_TIMEOUT}, "
-            f"(plan_trip('{origin}', '{destination}', {deadline}, Itinerary), "
-            f"format_itinerary(Itinerary, Formatted))"
-            f"), time_limit_exceeded, fail)"
-        )
-        logger.info("Executing schedule query: %s", query)
-        # Limit raw results to avoid combinatorial explosion on large schedules
-        results = list(islice(self.prolog.query(query), 100))
-        logger.info("Schedule query returned %d result(s)", len(results))
-
-        itineraries = []
-        seen = set()
-        for r in results:
-            legs = self._parse_formatted_legs(r['Formatted'])
-            key = tuple((l['from'], l['to'], l['depart'], l['arrive']) for l in legs)
-            if key not in seen:
-                seen.add(key)
-                itineraries.append(legs)
-        return itineraries
-
-    def attractions_near(self, station: str) -> list[str]:
-        """Return attraction names near a given station."""
-        query = f"attraction_near_station(Attraction, '{station}')"
-        logger.info("Executing Prolog query: %s", query)
-        results = list(self.prolog.query(query))
-        return list({str(r['Attraction']) for r in results})
-
-    def get_attractions_by_station(self) -> dict[str, list[str]]:
-        """Return attractions grouped by nearest station.
-
-        Returns:
-            Dict mapping station name to list of attraction names.
-        """
-        query = "near_station(Attraction, Station)"
-        logger.info("Executing Prolog query: %s", query)
-        results = list(self.prolog.query(query))
-        by_station: dict[str, list[str]] = {}
-        for r in results:
-            station = str(r['Station'])
-            attraction = str(r['Attraction'])
-            by_station.setdefault(station, []).append(attraction)
-        logger.info("Found attractions at %d stations", len(by_station))
-        return by_station
-
-    def get_nightlife_venues(self) -> dict[str, list[dict]]:
-        """Return nightlife venues grouped by nearest station.
-
-        Returns:
-            Dict mapping station name to list of {"name": str, "category": str}.
-        """
-        query = "nightlife_near_station(Venue, Category, Station)"
-        logger.info("Executing Prolog query: %s", query)
-        results = list(self.prolog.query(query))
-        venues_by_station: dict[str, list[dict]] = {}
-        for r in results:
-            station = str(r['Station'])
-            venues_by_station.setdefault(station, []).append({
-                "name": str(r['Venue']),
-                "category": str(r['Category']),
-            })
-        logger.info("Found nightlife venues at %d stations", len(venues_by_station))
-        return venues_by_station
-
-    def _parse_formatted_legs(self, formatted_term) -> list[dict]:
-        """Parse formatted_leg terms from Prolog into Python dicts."""
-        legs = []
-        for item in formatted_term:
-            s = str(item)
-            if s.startswith('formatted_leg('):
-                inner = s[len('formatted_leg('):-1]
-                parts = self._split_top_level(inner)
-                legs.append({
-                    "from": parts[0].strip().strip("'"),
-                    "to": parts[1].strip().strip("'"),
-                    "line": parts[2].strip().strip("'"),
-                    "depart": parts[3].strip().strip("'"),
-                    "arrive": parts[4].strip().strip("'"),
-                })
-        return legs

@@ -112,7 +112,7 @@ export default function RoutePage() {
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
             >
-              {route.from} → {route.to}
+              {route.origin} → {route.destination}
             </motion.h1>
             <motion.p
               className={`text-sm ${colors.textMuted}`}

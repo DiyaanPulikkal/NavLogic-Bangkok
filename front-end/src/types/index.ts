@@ -6,6 +6,7 @@ export interface StationInfo {
 export interface AttractionInfo {
   name: string;
   station: string;
+  tags: string[];
 }
 
 export interface RouteStep {
@@ -19,14 +20,14 @@ export interface RouteStep {
 }
 
 export interface RouteData {
-  from: string;
-  to: string;
+  origin: string;
+  destination: string;
   total_time: number;
   steps: RouteStep[];
 }
 
 export interface RouteResponse {
-  type: "route";
+  type: "plan";
   data: RouteData;
 }
 
@@ -35,75 +36,36 @@ export interface ErrorResponse {
   data: { message: string };
 }
 
-export interface ScheduleLeg {
-  from: string;
-  to: string;
-  line: string;
-  depart: string;
-  arrive: string;
+export interface AuditEntry {
+  candidate: string;
+  violations: { step: RouteStep; reason: string }[];
 }
 
-export interface ScheduleData {
+export interface PlanData {
   origin: string;
-  destination: string;
-  deadline: string;
-  itineraries: ScheduleLeg[][];
+  destination?: string;
+  poi?: string;
+  total_time?: number;
+  steps?: RouteStep[];
+  preference_score?: number;
+  relaxation_note?: string[] | null;
+  audit_trail?: AuditEntry[] | null;
+  alternatives?: string[] | null;
+  unknown_tags?: string[];
+  note?: string;
   answer?: string;
 }
 
-export interface ScheduleResponse {
-  type: "schedule";
-  data: ScheduleData;
+export interface PlanResponse {
+  type: "plan";
+  data: PlanData;
 }
 
-export interface DayPlanLeg {
-  from: string;
-  to: string;
-  arrive_by: string;
-  itineraries: ScheduleLeg[][];
-  route?: RouteData | null;
-  attractions: string[];
-}
-
-export interface DayPlanData {
-  origin: string;
-  stops: string[];
-  legs: DayPlanLeg[];
-  answer?: string;
-}
-
-export interface DayPlanResponse {
-  type: "day_plan";
-  data: DayPlanData;
-}
-
-export interface NightlifeLeg {
-  from: string;
-  to: string;
-  arrive_by: string;
-  route: RouteData | null;
-  attractions: string[];
-}
-
-export interface NightlifeData {
-  origin: string;
-  stops: string[];
-  legs: NightlifeLeg[];
-  start_time: string;
-  end_time: string;
-  last_train_note: string | null;
-  answer?: string;
-}
-
-export interface NightlifeResponse {
-  type: "nightlife";
-  data: NightlifeData;
-}
-
-export interface ExploreResponse {
-  type: "explore";
-  data: NightlifeData;
+export interface AnswerResponse {
+  type: "answer";
+  data: { answer: string };
 }
 
 export type ApiRouteResult = RouteResponse | ErrorResponse;
-export type ApiResult = RouteResponse | ScheduleResponse | DayPlanResponse | NightlifeResponse | ExploreResponse | ErrorResponse | { type: "answer"; data: { answer: string } };
+export type QueryResponse = PlanResponse | AnswerResponse | ErrorResponse;
+export type ApiResult = QueryResponse;
