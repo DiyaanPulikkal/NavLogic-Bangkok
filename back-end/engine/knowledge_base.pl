@@ -120,11 +120,28 @@ connects('Hua Lamphong (BL28)', 'Wat Mangkon (BL29)',    1).
 connects('Wat Mangkon (BL29)',  'Sam Yot (BL30)',        1).
 connects('Sam Yot (BL30)',      'Sanam Chai (BL31)',     1).
 
+% --- Airport Rail Link (city-centre segment) ---
+% Only the three stations needed to bridge BTS Phaya Thai ↔ MRT Phetchaburi
+% are modeled. The full ARL extends out to Suvarnabhumi (A1); those stops
+% are out of scope for the demo network.
+station('Phaya Thai (A8)',      airport_rail_link).
+station('Ratchaprarop (A7)',    airport_rail_link).
+station('Makkasan (A6)',        airport_rail_link).
+
+connects('Phaya Thai (A8)',     'Ratchaprarop (A7)',     2).
+connects('Ratchaprarop (A7)',   'Makkasan (A6)',         2).
+
 % --- Inter-line interchange walks (cost 10 = noticeable transfer penalty) ---
 connects('Asok (E4)',           'Sukhumvit (BL22)',      10).
 connects('Sala Daeng (S2)',     'Silom (BL26)',          10).
 connects('Mo Chit (N8)',        'Phra Ram 9 (BL20)',     10).  /* indirect via Chatuchak; modeled as direct walk for demo */
-connects('Phaya Thai (N2)',     'Phetchaburi (BL21)',    10).
+
+% BTS Phaya Thai ↔ ARL Phaya Thai is a short in-station skywalk;
+% ARL Makkasan ↔ MRT Phetchaburi is a longer elevated walkway.
+% Together they replace the unrealistic direct N2↔BL21 edge: the only
+% way from BTS Phaya Thai to MRT Phetchaburi is via the ARL chain.
+connects('Phaya Thai (N2)',     'Phaya Thai (A8)',        5).
+connects('Makkasan (A6)',       'Phetchaburi (BL21)',     7).
 
 /* edge/3 — bidirectional view of connects/3 (used by Python Dijkstra) */
 edge(A, B, T) :- connects(A, B, T).

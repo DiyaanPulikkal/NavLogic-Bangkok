@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NavLogic Pipeline Trace — Example Query Walkthrough</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', sans-serif;
+    background: #f0f4fa;
+    color: #2d3748;
+    line-height: 1.6;
+    padding: 40px 20px;
+  }
+
+  .container { max-width: 1100px; margin: 0 auto; }
+
+  h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    text-align: center;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, #4a6cf7, #6cb4ee);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .subtitle {
+    text-align: center;
+    color: #7a8ba8;
+    font-size: 0.95rem;
+    margin-bottom: 48px;
+  }
+
+  .user-query {
+    background: linear-gradient(135deg, #e8f0fe, #dce8f8);
+    border: 1px solid #b8d0f0;
+    border-radius: 16px;
+    padding: 28px 32px;
+    margin-bottom: 40px;
+    text-align: center;
+  }
+
+  .user-query .label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: #4a6cf7;
+    margin-bottom: 12px;
+    font-weight: 600;
+  }
+
+  .user-query .text {
+    font-size: 1.3rem;
+    font-style: italic;
+    color: #1e293b;
+    margin-bottom: 8px;
+  }
+
+  .user-query .context {
+    font-size: 0.85rem;
+    color: #6b7f9e;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  /* Arrow connector */
+  .arrow-down {
+    display: flex;
+    justify-content: center;
+    margin: 12px 0;
+  }
+
+  .arrow-down svg { opacity: 0.45; }
+
+  /* Pipeline step */
+  .step {
+    background: #ffffff;
+    border: 1px solid #d4e0f0;
+    border-radius: 16px;
+    margin-bottom: 12px;
+    overflow: hidden;
+    transition: border-color 0.3s, box-shadow 0.3s;
+    box-shadow: 0 1px 4px rgba(74,108,247,0.06);
+  }
+
+  .step:hover { border-color: #8ab4f8; box-shadow: 0 2px 12px rgba(74,108,247,0.1); }
+
+  .step-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 20px 24px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .step-number {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 1rem;
+    flex-shrink: 0;
+  }
+
+  .step-llm .step-number { background: #ede9fe; color: #6d5acf; }
+  .step-python .step-number { background: #fef3cd; color: #b8860b; }
+  .step-prolog .step-number { background: #d4f1f9; color: #0891b2; }
+  .step-relaxation .step-number { background: #fee2e2; color: #dc2626; }
+  .step-dijkstra .step-number { background: #d1fae5; color: #059669; }
+  .step-audit .step-number { background: #ede9fe; color: #6d5acf; }
+  .step-narrate .step-number { background: #ede9fe; color: #6d5acf; }
+
+  .step-title-area { flex: 1; }
+
+  .step-title {
+    font-weight: 600;
+    font-size: 1.05rem;
+    color: #1e293b;
+  }
+
+  .step-who {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-top: 2px;
+  }
+
+  .step-llm .step-who { color: #7c6dd8; }
+  .step-python .step-who { color: #b8860b; }
+  .step-prolog .step-who { color: #0891b2; }
+  .step-relaxation .step-who { color: #dc2626; }
+  .step-dijkstra .step-who { color: #059669; }
+  .step-audit .step-who { color: #7c6dd8; }
+  .step-narrate .step-who { color: #7c6dd8; }
+
+  .toggle-icon {
+    color: #a0b3cc;
+    font-size: 1.2rem;
+    transition: transform 0.3s;
+  }
+
+  .step.open .toggle-icon { transform: rotate(90deg); }
+
+  .step-body {
+    display: none;
+    padding: 0 24px 24px 80px;
+  }
+
+  .step.open .step-body { display: block; }
+
+  .explanation {
+    color: #5a6b83;
+    font-size: 0.9rem;
+    margin-bottom: 16px;
+    line-height: 1.7;
+  }
+
+  .explanation strong { color: #2d3748; }
+
+  code, .code-block {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.82rem;
+  }
+
+  code {
+    background: #e8f0fe;
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: #3b5998;
+  }
+
+  .code-block {
+    background: #f7f9fc;
+    border: 1px solid #d4e0f0;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin: 12px 0;
+    overflow-x: auto;
+    line-height: 1.8;
+    white-space: pre-wrap;
+    color: #334155;
+  }
+
+  .code-block .comment { color: #94a3b8; }
+  .code-block .keyword { color: #dc2626; }
+  .code-block .string { color: #2563eb; }
+  .code-block .tag { color: #059669; }
+  .code-block .operator { color: #b8860b; }
+  .code-block .result { color: #6d5acf; }
+  .code-block .fail { color: #dc2626; }
+  .code-block .pass { color: #059669; }
+
+  .visual-box {
+    background: #f7f9fc;
+    border: 1px solid #d4e0f0;
+    border-radius: 12px;
+    padding: 24px;
+    margin: 16px 0;
+  }
+
+  .tree-node {
+    padding: 6px 14px;
+    border-radius: 8px;
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    margin: 3px;
+    font-weight: 600;
+  }
+
+  .tree-and { background: #dbeafe; color: #2563eb; }
+  .tree-any { background: #d1fae5; color: #059669; }
+  .tree-none { background: #fee2e2; color: #dc2626; }
+  .tree-prefer { background: #fef3cd; color: #b8860b; }
+
+  .tree-indent { margin-left: 32px; }
+  .tree-indent-2 { margin-left: 64px; }
+
+  .binding-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid #e2ebf5;
+    font-size: 0.85rem;
+  }
+
+  .binding-row:last-child { border-bottom: none; }
+
+  .binding-raw {
+    font-family: 'JetBrains Mono', monospace;
+    background: #fef3cd;
+    padding: 4px 10px;
+    border-radius: 6px;
+    color: #92600a;
+    min-width: 120px;
+    text-align: center;
+  }
+
+  .binding-arrow { color: #a0b3cc; font-size: 1.2rem; }
+
+  .binding-clause {
+    font-family: 'JetBrains Mono', monospace;
+    color: #5a6b83;
+    font-size: 0.78rem;
+    flex: 1;
+  }
+
+  .binding-result {
+    font-family: 'JetBrains Mono', monospace;
+    background: #d1fae5;
+    padding: 4px 10px;
+    border-radius: 6px;
+    color: #059669;
+    min-width: 140px;
+    text-align: center;
+  }
+
+  /* POI evaluation table */
+  .poi-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 0.82rem;
+    margin: 12px 0;
+  }
+
+  .poi-table th {
+    background: #e8f0fe;
+    padding: 10px 14px;
+    text-align: left;
+    font-weight: 600;
+    color: #2d3748;
+    border-bottom: 2px solid #c5d5ea;
+  }
+
+  .poi-table th:first-child { border-radius: 8px 0 0 0; }
+  .poi-table th:last-child { border-radius: 0 8px 0 0; }
+
+  .poi-table td {
+    padding: 10px 14px;
+    border-bottom: 1px solid #e2ebf5;
+    color: #5a6b83;
+    background: #ffffff;
+  }
+
+  .poi-table tr:hover td { background: #f0f5ff; }
+
+  .check { color: #059669; font-weight: 700; }
+  .cross { color: #dc2626; font-weight: 700; }
+  .highlight-row td { background: #d1fae522; }
+
+  /* Route visual */
+  .route-visual {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    flex-wrap: wrap;
+    padding: 16px 0;
+  }
+
+  .station-node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .station-dot {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 3px solid;
+  }
+
+  .dot-bts { border-color: #059669; background: #d1fae5; }
+  .dot-mrt { border-color: #2563eb; background: #dbeafe; }
+  .dot-transfer { border-color: #b8860b; background: #fef3cd; }
+  .dot-arl { border-color: #e85d04; background: #fff1e6; }
+
+  .station-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.65rem;
+    color: #5a6b83;
+    max-width: 80px;
+    text-align: center;
+    line-height: 1.2;
+  }
+
+  .route-edge {
+    height: 3px;
+    width: 36px;
+    flex-shrink: 0;
+  }
+
+  .edge-bts { background: #059669; }
+  .edge-mrt { background: #2563eb; }
+  .edge-arl { background: #e85d04; }
+  .edge-transfer { background: repeating-linear-gradient(90deg, #b8860b, #b8860b 4px, transparent 4px, transparent 8px); height: 3px; }
+
+  .route-cost {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    color: #94a3b8;
+    position: relative;
+    top: -16px;
+    margin: 0 -8px;
+  }
+
+  /* Summary banner */
+  .summary-banner {
+    background: linear-gradient(135deg, #e8f0fe, #dce8f8);
+    border: 2px solid #8ab4f8;
+    border-radius: 16px;
+    padding: 32px;
+    margin-top: 32px;
+    text-align: center;
+  }
+
+  .summary-banner h3 {
+    font-size: 1.1rem;
+    color: #4a6cf7;
+    margin-bottom: 16px;
+  }
+
+  .summary-banner .answer {
+    font-size: 1rem;
+    color: #2d3748;
+    line-height: 1.8;
+    max-width: 800px;
+    margin: 0 auto;
+  }
+
+  .relaxation-badge {
+    display: inline-block;
+    background: #fee2e2;
+    border: 1px solid #fca5a5;
+    color: #dc2626;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    margin: 8px 4px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .legend {
+    display: flex;
+    justify-content: center;
+    gap: 24px;
+    margin: 24px 0 40px;
+    flex-wrap: wrap;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8rem;
+    color: #5a6b83;
+  }
+
+  .legend-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+  }
+
+  .legend-dot.llm { background: #7c6dd8; }
+  .legend-dot.prolog { background: #0891b2; }
+  .legend-dot.python { background: #b8860b; }
+  .legend-dot.graph { background: #059669; }
+
+  .expand-all {
+    text-align: center;
+    margin-bottom: 24px;
+  }
+
+  .expand-all button {
+    background: #ffffff;
+    border: 1px solid #c5d5ea;
+    color: #5a6b83;
+    padding: 8px 20px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.85rem;
+    transition: all 0.2s;
+    box-shadow: 0 1px 3px rgba(74,108,247,0.08);
+  }
+
+  .expand-all button:hover {
+    background: #e8f0fe;
+    color: #2d3748;
+    border-color: #8ab4f8;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>NavLogic Pipeline Trace</h1>
+  <p class="subtitle">A single query traced through every component of the neuro-symbolic engine</p>
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot llm"></div> LLM (Gemini)</div>
+    <div class="legend-item"><div class="legend-dot prolog"></div> Prolog (Rulebook)</div>
+    <div class="legend-item"><div class="legend-dot python"></div> Python (Orchestrator)</div>
+    <div class="legend-item"><div class="legend-dot graph"></div> Dijkstra (Graph)</div>
+  </div>
+
+  <!-- User Query -->
+  <div class="user-query">
+    <div class="label">User Input</div>
+    <div class="text">"I'm at Siam station. I want a night market with street food, but not somewhere crowded."</div>
+    <div class="context">Time Context: Saturday, 20:00 &rarr; t(sat, 20, 0)</div>
+  </div>
+
+  <div class="expand-all">
+    <button onclick="toggleAll()">Expand / Collapse All Steps</button>
+  </div>
+
+  <!-- STEP 1: LLM Translation -->
+  <div class="arrow-down">
+    <svg width="24" height="32" viewBox="0 0 24 32"><path d="M12 0v28M4 20l8 10 8-10" stroke="#7c6dd8" stroke-width="2" fill="none"/></svg>
+  </div>
+
+  <div class="step step-llm open" onclick="this.classList.toggle('open')">
+    <div class="step-header">
+      <div class="step-number">1</div>
+      <div class="step-title-area">
+        <div class="step-title">Semantic Extraction &mdash; Natural Language to Logical Form</div>
+        <div class="step-who">LLM (Gemini)</div>
+      </div>
+      <div class="toggle-icon">&#9654;</div>
+    </div>
+    <div class="step-body" onclick="event.stopPropagation()">
+      <div class="explanation">
+        The LLM receives the user's natural language along with the <strong>full tag vocabulary</strong> and <strong>synonym list</strong> injected into its system prompt.
+        Its only job: emit a <strong>structured function call</strong> containing a recursive JSON logical form. It never routes, never scores, never queries the database.
+      </div>
+      <div class="code-block">
+<span class="comment">// LLM emits a "plan" function call with these arguments:</span>
+{
+  <span class="string">"origin"</span>: <span class="string">"Siam"</span>,
+  <span class="string">"goal"</span>: {
+    <span class="keyword">"operator"</span>: <span class="operator">"and"</span>,
+    <span class="keyword">"args"</span>: [
+      { <span class="keyword">"operator"</span>: <span class="operator">"any_tag"</span>, <span class="keyword">"tags"</span>: [<span class="tag">"night_market"</span>] },
+      { <span class="keyword">"operator"</span>: <span class="operator">"any_tag"</span>, <span class="keyword">"tags"</span>: [<span class="tag">"street_food"</span>] },
+      { <span class="keyword">"operator"</span>: <span class="operator">"none_tag"</span>, <span class="keyword">"tags"</span>: [<span class="tag">"crowded"</span>] }
+    ]
+  },
+  <span class="string">"time_context"</span>: { <span class="string">"weekday"</span>: <span class="string">"sat"</span>, <span class="string">"hour"</span>: 20, <span class="string">"minute"</span>: 0 }
+}
+</div>
+      <div class="explanation">
+        This JSON tree is the <strong>Abstract Syntax Tree (AST)</strong> of the user's intent.
+        Think of it like a parse tree: the LLM is the parser, and Prolog is the evaluator.
+      </div>
+      <div class="visual-box">
+        <div style="text-align: center; margin-bottom: 12px; font-size: 0.85rem; color: #2563eb; font-weight: 600;">Goal AST (Logical Form)</div>
+        <div style="text-align: center;">
+          <div><span class="tree-node tree-and">AND</span></div>
+          <div style="margin-top: 8px; display: flex; justify-content: center; gap: 16px; flex-wrap: wrap;">
+            <span class="tree-node tree-any">any_tag([night_market])</span>
+            <span class="tree-node tree-any">any_tag([street_food])</span>
+            <span class="tree-node tree-none">none_tag([crowded])</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 2: Python Serialization -->
+  <div class="arrow-down">
+    <svg width="24" height="32" viewBox="0 0 24 32"><path d="M12 0v28M4 20l8 10 8-10" stroke="#b8860b" stroke-width="2" fill="none"/></svg>
+  </div>
+
+  <div class="step step-python" onclick="this.classList.toggle('open')">
+    <div class="step-header">
+      <div class="step-number">2</div>
+      <div class="step-title-area">
+        <div class="step-title">Goal Serialization &mdash; JSON to Prolog Terms</div>
+        <div class="step-who">Python (Orchestrator)</div>
+      </div>
+      <div class="toggle-icon">&#9654;</div>
+    </div>
+    <div class="step-body" onclick="event.stopPropagation()">
+      <div class="explanation">
+        Python's <code>_goal_to_prolog()</code> recursively walks the JSON AST and serializes it
+        into a Prolog compound term. This is pure syntactic translation &mdash; no reasoning.
+      </div>
+      <div class="code-block">
+<span class="comment">% Python serializes the JSON goal into this Prolog term:</span>
+<span class="keyword">and</span>([<span class="operator">any_tag</span>([<span class="tag">night_market</span>]),
+     <span class="operator">any_tag</span>([<span class="tag">street_food</span>]),
+     <span class="operator">none_tag</span>([<span class="tag">crowded</span>])])
+
+<span class="comment">% Time context becomes:</span>
+<span class="keyword">t</span>(<span class="string">sat</span>, <span class="string">20</span>, <span class="string">0</span>)
+</div>
+    </div>
+  </div>
+
+  <!-- STEP 3: bind_tag -->
+  <div class="arrow-down">
+    <svg width="24" height="32" viewBox="0 0 24 32"><path d="M12 0v28M4 20l8 10 8-10" stroke="#0891b2" stroke-width="2" fill="none"/></svg>
+  </div>
+
+  <div class="step step-prolog" onclick="this.classList.toggle('open')">
+    <div class="step-header">
+      <div class="step-number">3</div>
+      <div class="step-title-area">
+        <div class="step-title">Synonym Binding &mdash; Open Vocabulary to Canonical Tags</div>
+        <div class="step-who">Prolog (ontology.pl &mdash; bind_tag/2)</div>
+      </div>
+      <div class="toggle-icon">&#9654;</div>
+    </div>
+    <div class="step-body" onclick="event.stopPropagation()">
+      <div class="explanation">
+        Every tag in the goal passes through <code>bind_tag/2</code>, which uses <strong>cuts (!)</strong>
+        to enforce deterministic, first-match binding. Three clauses fire in priority order:
+        synonym &rarr; known tag &rarr; unknown wrapper.
+      </div>
+      <div class="visual-box">
+        <div class="binding-row">
+          <div class="binding-raw">night_market</div>
+          <div class="binding-arrow">&rarr;</div>
+          <div class="binding-clause">synonym('night market', night_market) &rarr; <strong>Clause 1 fires, ! cuts</strong></div>
+          <div class="binding-arrow">&rarr;</div>
+          <div class="binding-result">night_market</div>
+        </div>
+        <div class="binding-row">
+          <div class="binding-raw">street_food</div>
+          <div class="binding-arrow">&rarr;</div>
+          <div class="binding-clause">synonym('street food', street_food) &rarr; <strong>Clause 1 fires, ! cuts</strong></div>
+          <div class="binding-arrow">&rarr;</div>
+          <div class="binding-result">street_food</div>
+        </div>
+        <div class="binding-row">
+          <div class="binding-raw">crowded</div>
+          <div class="binding-arrow">&rarr;</div>
+          <div class="binding-clause">synonym('crowded', high_density) &rarr; <strong>Clause 1 fires, ! cuts</strong></div>
+          <div class="binding-arrow">&rarr;</div>
+          <div class="binding-result">high_density</div>
+        </div>
+      </div>
+      <div class="explanation">
+        Notice: the user said <strong>"crowded"</strong> but the KB uses <strong>high_density</strong>.
+        The synonym layer bridges this gap. Without it, the tag would fall through to Clause 3
+        and become <code>unknown(crowded)</code>, and the constraint would be silently ignored.
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 4: Candidate Evaluation -->
+  <div class="arrow-down">
+    <svg width="24" height="32" viewBox="0 0 24 32"><path d="M12 0v28M4 20l8 10 8-10" stroke="#0891b2" stroke-width="2" fill="none"/></svg>
+  </div>
+
+  <div class="step step-prolog" onclick="this.classList.toggle('open')">
+    <div class="step-header">
+      <div class="step-number">4</div>
+      <div class="step-title-area">
+        <div class="step-title">Candidate Evaluation &mdash; The Meta-Interpreter Filters POIs</div>
+        <div class="step-who">Prolog (rules.pl &mdash; satisfies/3 + candidates/3)</div>
+      </div>
+      <div class="toggle-icon">&#9654;</div>
+    </div>
+    <div class="step-body" onclick="event.stopPropagation()">
+      <div class="explanation">
+        <code>candidates/3</code> iterates over every POI in the knowledge base and calls
+        <code>satisfies(Poi, Goal, t(sat,20,0))</code>. The meta-interpreter walks the AST recursively:
+        for <strong>AND</strong>, every child must succeed; for <strong>any_tag</strong>, at least one tag
+        must be present (respecting subsumption + temporal gating); for <strong>none_tag</strong>,
+        no tag may be present.
+      </div>
+      <div class="explanation">
+        <strong>Key temporal detail:</strong> Jodd Fairs has <code>active_tag(jodd_fairs, night_market, after_sunset)</code>
+        and <code>active_tag(jodd_fairs, high_density, after_sunset)</code>. At Saturday 8 PM,
+        <code>time_matches(after_sunset, t(sat, 20, 0))</code> succeeds because <code>20 &ge; 18</code>.
+        So both <code>night_market</code> and <code>high_density</code> are <strong>active</strong> on Jodd Fairs right now.
+      </div>
+      <table class="poi-table">
+        <thead>
+          <tr>
+            <th>POI</th>
+            <th>any_tag([night_market])</th>
+            <th>any_tag([street_food])</th>
+            <th>none_tag([high_density])</th>
+            <th>Result</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Jodd Fairs</strong></td>
+            <td><span class="check">&#10003;</span> <small>active after_sunset</small></td>
+            <td><span class="check">&#10003;</span> <small>tagged always</small></td>
+            <td><span class="cross">&#10007;</span> <small>active after_sunset &rarr; IS high_density</small></td>
+            <td><span class="cross" style="font-size:1.1rem;">FAIL</span></td>
+          </tr>
+          <tr>
+            <td><strong>Asiatique</strong></td>
+            <td><span class="check">&#10003;</span> <small>active after_sunset</small></td>
+            <td><span class="cross">&#10007;</span> <small>no street_food tag</small></td>
+            <td><small style="color:#94a3b8;">n/a</small></td>
+            <td><span class="cross" style="font-size:1.1rem;">FAIL</span></td>
+          </tr>
+          <tr>
+            <td><strong>Chatuchak</strong></td>
+            <td><span class="cross">&#10007;</span> <small>tagged market, not night_market</small></td>
+            <td><small style="color:#94a3b8;">n/a</small></td>
+            <td><small style="color:#94a3b8;">n/a</small></td>
+            <td><span class="cross" style="font-size:1.1rem;">FAIL</span></td>
+          </tr>
+          <tr>
+            <td><strong>Chinatown</strong></td>
+            <td><span class="cross">&#10007;</span> <small>no night_market tag</small></td>
+            <td><small style="color:#94a3b8;">n/a</small></td>
+            <td><small style="color:#94a3b8;">n/a</small></td>
+            <td><span class="cross" style="font-size:1.1rem;">FAIL</span></td>
+          </tr>
+          <tr>
+            <td colspan="5" style="text-align:center; color:#94a3b8; padding: 12px;"><em>...all other 16 POIs also fail (no night_market tag)...</em></td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="code-block">
+<span class="comment">% Prolog query:</span>
+?- candidates(
+     <span class="keyword">and</span>([<span class="operator">any_tag</span>([night_market]), <span class="operator">any_tag</span>([street_food]), <span class="operator">none_tag</span>([high_density])]),
+     <span class="keyword">t</span>(sat, 20, 0),
+     Cands
+   ).
+
+<span class="result">Cands = []</span>   <span class="comment">% Empty! No POI satisfies ALL three constraints at this time.</span>
+</div>
+      <div class="explanation" style="background: #fee2e2; padding: 16px; border-radius: 8px; border-left: 4px solid #dc2626;">
+        <strong>Candidates list is empty.</strong> The only night market with street food (Jodd Fairs)
+        is also <code>high_density</code> at 8 PM &mdash; which violates the user's <code>none_tag([crowded])</code>.
+        The system does NOT silently return nothing. It triggers <strong>constraint relaxation</strong>.
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 5: Relaxation -->
+  <div class="arrow-down">
+    <svg width="24" height="32" viewBox="0 0 24 32"><path d="M12 0v28M4 20l8 10 8-10" stroke="#dc2626" stroke-width="2" fill="none"/></svg>
+  </div>
+
+  <div class="step step-relaxation" onclick="this.classList.toggle('open')">
+    <div class="step-header">
+      <div class="step-number">5</div>
+      <div class="step-title-area">
+        <div class="step-title">Constraint Relaxation &mdash; Finding the Minimal Drop Set</div>
+        <div class="step-who">Prolog (rules.pl &mdash; relax/4)</div>
+      </div>
+      <div class="toggle-icon">&#9654;</div>
+    </div>
+    <div class="step-body" onclick="event.stopPropagation()">
+      <div class="explanation">
+        <code>relax/4</code> uses <code>select/3</code> to systematically try removing one conjunct
+        at a time from the AND list, then re-runs <code>candidates/3</code> on the surviving sub-goal.
+        It stops at the <strong>first minimal drop</strong> that produces a non-empty candidate set.
+        This is bounded: single drops first, then pairs, max 2 drops total.
+      </div>
+      <div class="code-block">
+<span class="comment">% Prolog tries dropping each conjunct one at a time:</span>
+
+<span class="comment">% Try 1: Drop any_tag([night_market])</span>
+?- candidates(<span class="keyword">and</span>([<span class="operator">any_tag</span>([street_food]), <span class="operator">none_tag</span>([high_density])]), t(sat,20,0), C).
+<span class="result">C = ['Chinatown'-... ]</span>  <span class="comment">% Non-empty! But Prolog tries ALL single drops via backtracking...</span>
+
+<span class="comment">% Try 2: Drop any_tag([street_food])</span>
+?- candidates(<span class="keyword">and</span>([<span class="operator">any_tag</span>([night_market]), <span class="operator">none_tag</span>([high_density])]), t(sat,20,0), C).
+<span class="result">C = ['Asiatique'-... ]</span>  <span class="comment">% Asiatique is night_market + NOT high_density at 8 PM</span>
+
+<span class="comment">% Try 3: Drop none_tag([high_density])  &larr; THIS IS THE KEY ONE</span>
+?- candidates(<span class="keyword">and</span>([<span class="operator">any_tag</span>([night_market]), <span class="operator">any_tag</span>([street_food])]), t(sat,20,0), C).
+<span class="result">C = ['Jodd Fairs Night Market'-'Phra Ram 9 (BL20)'-0]</span>  <span class="pass">&#10003; Non-empty!</span>
+
+<span class="comment">% First single-drop solution found (via select/3 backtracking):</span>
+<span class="result">Dropped = [none_tag([high_density])]</span>
+<span class="result">Survivors = ['Jodd Fairs Night Market'-'Phra Ram 9 (BL20)'-0]</span>
+</div>
+      <div class="explanation">
+        The orchestrator now knows: <em>"I had to drop your 'not crowded' constraint to find anything.
+        The best match is Jodd Fairs, but it <strong>will</strong> be crowded at 8 PM."</em>
+        This is surfaced as a <strong>relaxation_note</strong> in the response.
+      </div>
+      <div style="text-align: center; padding: 8px;">
+        <span class="relaxation-badge">DROPPED: none_tag([high_density])</span>
+        <span style="color: #5a6b83; font-size: 0.85rem; display: block; margin-top: 8px;">
+          "We relaxed your 'not crowded' constraint to find a result"
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 6: Dijkstra -->
+  <div class="arrow-down">
+    <svg width="24" height="32" viewBox="0 0 24 32"><path d="M12 0v28M4 20l8 10 8-10" stroke="#059669" stroke-width="2" fill="none"/></svg>
+  </div>
+
+  <div class="step step-dijkstra" onclick="this.classList.toggle('open')">
+    <div class="step-header">
+      <div class="step-number">6</div>
+      <div class="step-title-area">
+        <div class="step-title">Shortest Path &mdash; Dijkstra from Siam to Phra Ram 9 (via ARL)</div>
+        <div class="step-who">Python (orchestrator.py &mdash; _dijkstra)</div>
+      </div>
+      <div class="toggle-icon">&#9654;</div>
+    </div>
+    <div class="step-body" onclick="event.stopPropagation()">
+      <div class="explanation">
+        Python builds a weighted adjacency graph from all <code>edge/3</code> facts (bidirectional)
+        and runs standard Dijkstra. Prolog has <strong>no concept of distance</strong> &mdash; this is pure
+        combinatorial graph math.
+      </div>
+      <div class="explanation">
+        Two candidate paths to <strong>Phra Ram 9 (BL20)</strong>:
+      </div>
+      <div class="code-block">
+<span class="comment">Path A (via Mo Chit interchange):</span>
+Siam <span class="operator">&rarr;4&rarr;</span> Ratchathevi <span class="operator">&rarr;1&rarr;</span> Phaya Thai <span class="operator">&rarr;2&rarr;</span> Victory Mon. <span class="operator">&rarr;3&rarr;</span> Sanam Pao
+  <span class="operator">&rarr;1&rarr;</span> Ari <span class="operator">&rarr;2&rarr;</span> Saphan Khwai <span class="operator">&rarr;2&rarr;</span> Mo Chit <span class="operator">&rarr;10&rarr;</span> Phra Ram 9
+<span class="fail">Total: 25 min</span>
+
+<span class="comment">Path B (via Phaya Thai + Airport Rail Link):  &larr; WINNER</span>
+Siam <span class="operator">&rarr;4&rarr;</span> Ratchathevi <span class="operator">&rarr;1&rarr;</span> Phaya Thai (N2)
+  <span class="operator">&rarr;5&rarr;</span> Phaya Thai (A8) <span class="comment">[skywalk to ARL]</span>
+  <span class="operator">&rarr;2&rarr;</span> Ratchaprarop (A7) <span class="operator">&rarr;2&rarr;</span> Makkasan (A6) <span class="comment">[ride ARL]</span>
+  <span class="operator">&rarr;7&rarr;</span> Phetchaburi (BL21) <span class="comment">[elevated walkway to MRT]</span>
+  <span class="operator">&rarr;1&rarr;</span> Phra Ram 9 (BL20)
+<span class="pass">Total: 22 min  &#10003;</span>
+</div>
+
+      <div class="visual-box">
+        <div style="text-align: center; margin-bottom: 16px; font-size: 0.85rem; color: #059669; font-weight: 600;">
+          Optimal Route (22 minutes)
+        </div>
+        <div class="route-visual" style="justify-content: center;">
+          <div class="station-node">
+            <div class="station-dot dot-bts"></div>
+            <div class="station-label">Siam<br>(CEN)</div>
+          </div>
+          <div class="route-edge edge-bts"></div>
+          <div class="station-node">
+            <div class="station-dot dot-bts"></div>
+            <div class="station-label">Ratchathevi<br>(N1)</div>
+          </div>
+          <div class="route-edge edge-bts"></div>
+          <div class="station-node">
+            <div class="station-dot dot-transfer"></div>
+            <div class="station-label" style="color:#b8860b;">Phaya Thai<br>(N2)</div>
+          </div>
+          <div class="route-edge edge-transfer"></div>
+          <div class="station-node">
+            <div class="station-dot dot-arl"></div>
+            <div class="station-label">Phaya Thai<br>(A8)</div>
+          </div>
+          <div class="route-edge edge-arl"></div>
+          <div class="station-node">
+            <div class="station-dot dot-arl"></div>
+            <div class="station-label">Ratchaprarop<br>(A7)</div>
+          </div>
+          <div class="route-edge edge-arl"></div>
+          <div class="station-node">
+            <div class="station-dot dot-transfer"></div>
+            <div class="station-label" style="color:#b8860b;">Makkasan<br>(A6)</div>
+          </div>
+          <div class="route-edge edge-transfer"></div>
+          <div class="station-node">
+            <div class="station-dot dot-mrt"></div>
+            <div class="station-label">Phetchaburi<br>(BL21)</div>
+          </div>
+          <div class="route-edge edge-mrt"></div>
+          <div class="station-node">
+            <div class="station-dot dot-mrt"></div>
+            <div class="station-label">Phra Ram 9<br>(BL20)</div>
+          </div>
+        </div>
+        <div style="display: flex; justify-content: center; gap: 24px; margin-top: 16px; font-size: 0.75rem; flex-wrap: wrap;">
+          <span style="color: #059669;">&#9679; BTS Sukhumvit (5 min)</span>
+          <span style="color: #b8860b;">&#9679; Skywalk to ARL (5 min)</span>
+          <span style="color: #e85d04;">&#9679; Airport Rail Link (4 min)</span>
+          <span style="color: #b8860b;">&#9679; Walkway to MRT (7 min)</span>
+          <span style="color: #2563eb;">&#9679; MRT Blue (1 min)</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 7: Audit -->
+  <div class="arrow-down">
+    <svg width="24" height="32" viewBox="0 0 24 32"><path d="M12 0v28M4 20l8 10 8-10" stroke="#7c6dd8" stroke-width="2" fill="none"/></svg>
+  </div>
+
+  <div class="step step-audit" onclick="this.classList.toggle('open')">
+    <div class="step-header">
+      <div class="step-number">7</div>
+      <div class="step-title-area">
+        <div class="step-title">Route Audit &mdash; Prolog Checks Python's Work</div>
+        <div class="step-who">Prolog (rules.pl &mdash; audit_route/3)</div>
+      </div>
+      <div class="toggle-icon">&#9654;</div>
+    </div>
+    <div class="step-body" onclick="event.stopPropagation()">
+      <div class="explanation">
+        The orchestrator hands the physical route steps <strong>back to Prolog</strong> along with the
+        original goal. <code>audit_route/3</code> uses <code>findall/3</code> to collect any <code>step_violates/3</code>
+        violations &mdash; e.g., transferring through an <code>open_air</code> station when the user
+        requested <code>none_tag([weather_exposed])</code>.
+      </div>
+      <div class="code-block">
+<span class="comment">% Python sends the route steps to Prolog for audit:</span>
+?- audit_route(
+     [<span class="keyword">ride</span>('BTS Sukhumvit', 'Siam (CEN)', 'Phaya Thai (N2)', _),
+      <span class="keyword">transfer</span>('Phaya Thai (N2)', 'Phaya Thai (A8)'),
+      <span class="keyword">ride</span>('Airport Rail Link', 'Phaya Thai (A8)', 'Makkasan (A6)', _),
+      <span class="keyword">transfer</span>('Makkasan (A6)', 'Phetchaburi (BL21)'),
+      <span class="keyword">ride</span>('MRT Blue', 'Phetchaburi (BL21)', 'Phra Ram 9 (BL20)', _)],
+     <span class="keyword">and</span>([any_tag([night_market]), any_tag([street_food]), none_tag([high_density])]),
+     Violations
+   ).
+
+<span class="comment">% Check: do either transfer violate any hard constraint?</span>
+<span class="comment">% Transfer 1: Phaya Thai (N2) &harr; Phaya Thai (A8) &mdash; skywalk, not open_air</span>
+<span class="comment">% Transfer 2: Makkasan (A6) &harr; Phetchaburi (BL21) &mdash; elevated walkway, not open_air</span>
+<span class="comment">% none_tag([high_density]) &rarr; step_violates checks for weather_exposed,</span>
+<span class="comment">%   mobility_demanding &mdash; neither applies to these transfers.</span>
+
+<span class="result">Violations = []</span>   <span class="pass">&#10003; Clean route! No replan needed.</span>
+</div>
+      <div class="explanation">
+        Had the route passed through <strong>Wat Mangkon (BL29)</strong> or <strong>Sam Yot (BL30)</strong>
+        (both <code>open_air</code>) and the goal contained <code>none_tag([weather_exposed])</code>,
+        the audit would fire a violation, the orchestrator would <strong>blacklist</strong> that route,
+        and Dijkstra would re-run &mdash; up to <code>MAX_REPLAN = 3</code> times.
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 8: LLM Narration -->
+  <div class="arrow-down">
+    <svg width="24" height="32" viewBox="0 0 24 32"><path d="M12 0v28M4 20l8 10 8-10" stroke="#7c6dd8" stroke-width="2" fill="none"/></svg>
+  </div>
+
+  <div class="step step-narrate" onclick="this.classList.toggle('open')">
+    <div class="step-header">
+      <div class="step-number">8</div>
+      <div class="step-title-area">
+        <div class="step-title">Natural Language Narration &mdash; LLM Writes the Final Answer</div>
+        <div class="step-who">LLM (Gemini)</div>
+      </div>
+      <div class="toggle-icon">&#9654;</div>
+    </div>
+    <div class="step-body" onclick="event.stopPropagation()">
+      <div class="explanation">
+        The LLM receives the complete <code>PlanData</code> &mdash; candidate, route steps, total time,
+        relaxation note, audit trail &mdash; and writes a natural-language answer. It narrates;
+        it does not reason. Every fact it reports was computed symbolically.
+      </div>
+      <div class="code-block">
+<span class="comment">// PlanData handed to LLM for narration:</span>
+{
+  <span class="string">"origin"</span>:           <span class="string">"Siam (CEN)"</span>,
+  <span class="string">"destination"</span>:      <span class="string">"Phra Ram 9 (BL20)"</span>,
+  <span class="string">"poi"</span>:              <span class="string">"Jodd Fairs Night Market"</span>,
+  <span class="string">"total_time"</span>:       <span class="string">22</span>,
+  <span class="string">"steps"</span>:            [<span class="comment">/* ride, transfer, ride */</span>],
+  <span class="string">"relaxation_note"</span>:  <span class="string">"Dropped: none_tag([high_density])"</span>,
+  <span class="string">"audit_trail"</span>:      [],
+  <span class="string">"unknown_tags"</span>:     []
+}
+</div>
+    </div>
+  </div>
+
+  <!-- Final Summary -->
+  <div class="summary-banner">
+    <h3>Final Response to User</h3>
+    <div class="answer">
+      "I found <strong>Jodd Fairs Night Market</strong> near Phra Ram 9 station &mdash; it has great street food
+      and it's lively on Saturday nights. <strong>Heads up though:</strong> I couldn't find a night market
+      with street food that isn't crowded at this hour, so I relaxed your 'avoid crowds' preference.
+      Jodd Fairs gets packed after sunset!<br><br>
+      <strong>Route (22 min):</strong> Take the BTS Sukhumvit Line from Siam to Phaya Thai (5 min),
+      walk to the Airport Rail Link at Phaya Thai (5 min skywalk), ride the ARL to Makkasan (4 min),
+      then walk to MRT Phetchaburi (7 min elevated walkway), and one stop to Phra Ram 9 (1 min)."
+    </div>
+  </div>
+</div>
+
+<script>
+  function toggleAll() {
+    const steps = document.querySelectorAll('.step');
+    const allOpen = [...steps].every(s => s.classList.contains('open'));
+    steps.forEach(s => {
+      if (allOpen) s.classList.remove('open');
+      else s.classList.add('open');
+    });
+  }
+</script>
+</body>
+</html>
