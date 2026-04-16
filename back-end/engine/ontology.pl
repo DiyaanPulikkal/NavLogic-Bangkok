@@ -209,3 +209,72 @@ to_atom(X, A) :- string(X), !, atom_string(A, X).
 bind_tag(Raw, Bound) :- to_atom(Raw, A), synonym(A, Bound), !.
 bind_tag(Raw, A)     :- to_atom(Raw, A), known_tag(A), !.
 bind_tag(Raw, unknown(Raw)).
+
+/* ==================================================================
+   Temporal specs (closed-vocabulary time layer)
+
+   time_matches(Spec, Time) succeeds when the given concrete Time
+   term — a compound t(Weekday, Hour, Minute) emitted by Python —
+   falls within the temporal window named by Spec.
+
+   Why a closed vocabulary: temporal specs are a finite taxonomy
+   (morning/afternoon/weekend/…) the LLM chooses from, not a free
+   surface the user types. Keeping the list closed lets the prompt
+   teach the LLM every option. Tags remain open-vocabulary; only
+   the temporal layer is enumerated.
+
+   Adding a new spec is one or more rules here. satisfies/3 never
+   changes when the temporal vocabulary grows.
+================================================================== */
+
+:- discontiguous time_matches/2.
+
+/* Coarse dayparts */
+time_matches(morning,        t(_, H, _)) :- H >= 6,  H < 12.
+time_matches(afternoon,      t(_, H, _)) :- H >= 12, H < 17.
+time_matches(evening,        t(_, H, _)) :- H >= 17, H < 22.
+time_matches(late_night,     t(_, H, _)) :- H >= 22.
+time_matches(late_night,     t(_, H, _)) :- H >= 0, H < 4.
+
+/* Sunset-anchored (Bangkok is roughly 18:00 year-round) */
+time_matches(after_sunset,   t(_, H, _)) :- H >= 18.
+time_matches(after_sunset,   t(_, H, _)) :- H >= 0, H < 4.
+time_matches(before_sunset,  t(_, H, _)) :- H >= 4, H < 18.
+
+/* Mealtime windows */
+time_matches(lunch,          t(_, H, _)) :- H >= 11, H =< 14.
+
+/* Weekday pivots */
+time_matches(weekend, t(sat, _, _)).
+time_matches(weekend, t(sun, _, _)).
+time_matches(weekday, t(mon, _, _)).
+time_matches(weekday, t(tue, _, _)).
+time_matches(weekday, t(wed, _, _)).
+time_matches(weekday, t(thu, _, _)).
+time_matches(weekday, t(fri, _, _)).
+
+/* Per-weekday atoms (for queries like "on Saturday") */
+time_matches(monday,    t(mon, _, _)).
+time_matches(tuesday,   t(tue, _, _)).
+time_matches(wednesday, t(wed, _, _)).
+time_matches(thursday,  t(thu, _, _)).
+time_matches(friday,    t(fri, _, _)).
+time_matches(saturday,  t(sat, _, _)).
+time_matches(sunday,    t(sun, _, _)).
+
+/* Compound windows */
+time_matches(friday_evening, t(fri, H, _)) :- H >= 17.
+time_matches(saturday_night, t(sat, H, _)) :- H >= 20.
+time_matches(saturday_night, t(sun, H, _)) :- H >= 0, H < 4.
+
+/* Vocabulary export — enumerated so Python's active_time_specs/0
+   helper returns a stable list without needing distinct/2 or
+   setof/3 on rule heads.
+*/
+time_spec_vocab([morning, afternoon, evening, late_night,
+                 after_sunset, before_sunset, lunch,
+                 weekend, weekday,
+                 monday, tuesday, wednesday, thursday, friday, saturday, sunday,
+                 friday_evening, saturday_night]).
+
+known_time_spec(S) :- time_spec_vocab(V), member(S, V).

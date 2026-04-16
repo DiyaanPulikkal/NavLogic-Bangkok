@@ -44,6 +44,21 @@ class GoalShapeError(ValueError):
     """Raised when a dict goal cannot be serialized to a Prolog term."""
 
 
+class TimeShapeError(ValueError):
+    """Raised when a time_context dict cannot be serialized to a t/3 term."""
+
+
+_WEEKDAY_CANON = {
+    "mon": "mon", "monday": "mon",
+    "tue": "tue", "tues": "tue", "tuesday": "tue",
+    "wed": "wed", "wednesday": "wed",
+    "thu": "thu", "thur": "thu", "thurs": "thu", "thursday": "thu",
+    "fri": "fri", "friday": "fri",
+    "sat": "sat", "saturday": "sat",
+    "sun": "sun", "sunday": "sun",
+}
+
+
 class PrologInterface:
     GOAL_OPS_LIST = {"and", "or"}
     GOAL_OPS_TAGLIST = {"any_tag", "all_tag", "none_tag", "prefer_tag"}
@@ -165,22 +180,38 @@ class PrologInterface:
             out[str(r["Raw"])] = str(r["Canon"])
         return out
 
+    def active_time_specs(self) -> list[str]:
+        """Closed-vocabulary temporal specs the LLM can emit.
+
+        Mirrors active_tag_vocabulary for the time layer: returns every
+        atom S for which time_matches(S, _) has a defining clause, so
+        the LLM's system prompt can enumerate the legal specs without
+        free-form invention.
+        """
+        results = list(self.prolog.query("time_spec_vocab(V)"))
+        if not results:
+            return []
+        return sorted({str(s) for s in results[0]["V"]})
+
     # ------------------------------------------------------------------
     # Logical-form queries (the open-vocabulary core).
     # ------------------------------------------------------------------
 
-    def candidates(self, goal: dict) -> list[dict]:
-        """POIs satisfying `goal`, each with its preference score.
+    def candidates(self, goal: dict, time_ctx: dict) -> list[dict]:
+        """POIs satisfying `goal` under `time_ctx`, each with its preference score.
 
         Inlines the findall as a direct conjunctive query so we get
         bound variables (Id, Name, Station, Score) without parsing
-        Prolog list/pair terms.
+        Prolog list/pair terms. The time term is threaded alongside
+        the goal — it lives outside the goal tree because the temporal
+        context is a per-query frame, not a subgoal.
         """
         goal_term = self._goal_to_prolog(goal)
+        time_term = self._time_to_prolog(time_ctx)
         query = (
             f"poi(Id, Name, Station), "
-            f"satisfies(Id, {goal_term}), "
-            f"preference_score(Id, {goal_term}, Score)"
+            f"satisfies(Id, {goal_term}, {time_term}), "
+            f"preference_score(Id, {goal_term}, {time_term}, Score)"
         )
         logger.info("Executing Prolog query: %s", query)
         seen, out = set(), []
@@ -209,16 +240,20 @@ class PrologInterface:
             return []
         return [str(t) for t in results[0]["Unknowns"]]
 
-    def relax(self, goal: dict) -> tuple[list[str], list[dict]] | None:
-        """Minimal-drop relaxation when `candidates(goal)` is empty.
+    def relax(self, goal: dict, time_ctx: dict) -> tuple[list[str], list[dict]] | None:
+        """Minimal-drop relaxation when `candidates(goal, time_ctx)` is empty.
 
         Returns (dropped_subgoal_strings, survivor_candidates) or None.
         Dropped subgoals come back as Prolog term strings (e.g.
         "none_tag([weather_exposed])"); the LLM narrates them in plain
-        English using the system-prompt formatting instructions.
+        English using the system-prompt formatting instructions. The
+        time term is threaded so a conjunct rejected purely because
+        its spec failed under the current frame (e.g. `any_tag([night_market])`
+        at 10 AM) still surfaces as the minimal drop.
         """
         goal_term = self._goal_to_prolog(goal)
-        query = f"relax({goal_term}, Drop, Survivors)"
+        time_term = self._time_to_prolog(time_ctx)
+        query = f"relax({goal_term}, {time_term}, Drop, Survivors)"
         logger.info("Executing Prolog query: %s", query)
         results = list(islice(self.prolog.query(query), 1))
         if not results:
@@ -284,6 +319,48 @@ class PrologInterface:
         """Quote a Python string as a Prolog atom (single-quoted)."""
         safe = str(s).replace("\\", "\\\\").replace("'", "\\'")
         return f"'{safe}'"
+
+    @classmethod
+    def _time_to_prolog(cls, time_ctx: dict) -> str:
+        """Serialize a time_context dict to a `t(Weekday, Hour, Minute)` term.
+
+        Required keys: `weekday` (mon/tue/.../sun or the full English
+        name), `hour` (0–23), `minute` (0–59). We canonicalize the
+        weekday to its three-letter atom so Prolog's per-weekday
+        time_matches clauses unify cleanly. Raises TimeShapeError for
+        any malformed input — the orchestrator catches this and surfaces
+        the error to the user rather than sending garbage to Prolog.
+        """
+        if not isinstance(time_ctx, dict):
+            raise TimeShapeError(
+                f"time_context must be a dict, got: {time_ctx!r}"
+            )
+        for key in ("weekday", "hour", "minute"):
+            if key not in time_ctx:
+                raise TimeShapeError(
+                    f"time_context missing required key: {key!r}"
+                )
+        raw_weekday = time_ctx["weekday"]
+        if not isinstance(raw_weekday, str):
+            raise TimeShapeError(
+                f"weekday must be a string, got: {raw_weekday!r}"
+            )
+        weekday = _WEEKDAY_CANON.get(raw_weekday.strip().lower())
+        if weekday is None:
+            raise TimeShapeError(
+                f"Unknown weekday: {raw_weekday!r}"
+            )
+        hour = time_ctx["hour"]
+        minute = time_ctx["minute"]
+        if not isinstance(hour, int) or isinstance(hour, bool):
+            raise TimeShapeError(f"hour must be an int, got: {hour!r}")
+        if not isinstance(minute, int) or isinstance(minute, bool):
+            raise TimeShapeError(f"minute must be an int, got: {minute!r}")
+        if not (0 <= hour <= 23):
+            raise TimeShapeError(f"hour out of range [0,23]: {hour}")
+        if not (0 <= minute <= 59):
+            raise TimeShapeError(f"minute out of range [0,59]: {minute}")
+        return f"t({weekday},{hour},{minute})"
 
     # ------------------------------------------------------------------
     # Result parsing helpers.

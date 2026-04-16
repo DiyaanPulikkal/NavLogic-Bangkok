@@ -14,7 +14,8 @@ for knowledge_base.pl + ontology.pl + rules.pl consistency.
 
 import pytest
 
-from engine.prolog import GoalShapeError, PrologInterface
+from engine.prolog import GoalShapeError, PrologInterface, TimeShapeError
+from tests.helpers import DEFAULT_TIME_CTX
 
 
 # ------------------------------------------------------------------
@@ -301,7 +302,7 @@ class TestVocabulary:
 class TestCandidates:
     def test_candidates_simple_any_tag(self):
         interface = PrologInterface()
-        results = interface.candidates({"any_tag": ["temple"]})
+        results = interface.candidates({"any_tag": ["temple"]}, DEFAULT_TIME_CTX)
         assert len(results) > 0
         for r in results:
             assert set(r.keys()) == {"id", "name", "station", "pref_score"}
@@ -309,7 +310,7 @@ class TestCandidates:
 
     def test_candidates_deduplicates_by_id(self):
         interface = PrologInterface()
-        results = interface.candidates({"any_tag": ["temple"]})
+        results = interface.candidates({"any_tag": ["temple"]}, DEFAULT_TIME_CTX)
         ids = [r["id"] for r in results]
         assert len(ids) == len(set(ids))
 
@@ -317,14 +318,15 @@ class TestCandidates:
         """Temples that are weather_exposed must be excluded when
         goal has none_tag([weather_exposed])."""
         interface = PrologInterface()
-        temples = interface.candidates({"any_tag": ["temple"]})
+        temples = interface.candidates({"any_tag": ["temple"]}, DEFAULT_TIME_CTX)
         filtered = interface.candidates(
             {
                 "and": [
                     {"any_tag": ["temple"]},
                     {"none_tag": ["weather_exposed"]},
                 ]
-            }
+            },
+            DEFAULT_TIME_CTX,
         )
         assert len(filtered) <= len(temples)
 
@@ -333,7 +335,8 @@ class TestCandidates:
         interface = PrologInterface()
         # 'temple' ∧ 'nightlife' is unlikely in the KB.
         out = interface.candidates(
-            {"and": [{"any_tag": ["temple"]}, {"any_tag": ["nightlife"]}]}
+            {"and": [{"any_tag": ["temple"]}, {"any_tag": ["nightlife"]}]},
+            DEFAULT_TIME_CTX,
         )
         assert out == [] or all(isinstance(r["id"], str) for r in out)
 
@@ -373,7 +376,7 @@ class TestRelax:
         }
         # If the full goal already has candidates, relax may still fire;
         # just assert the shape if it does.
-        result = interface.relax(goal)
+        result = interface.relax(goal, DEFAULT_TIME_CTX)
         if result is not None:
             dropped, survivors = result
             assert isinstance(dropped, list)
@@ -386,7 +389,75 @@ class TestRelax:
         interface = PrologInterface()
         # route_to/1 can't drop to anything meaningful.
         goal = {"route_to": "Narnia (XX)"}
-        assert interface.relax(goal) is None
+        assert interface.relax(goal, DEFAULT_TIME_CTX) is None
+
+
+# ------------------------------------------------------------------
+# Time-context serialization — every TimeShapeError branch.
+# ------------------------------------------------------------------
+
+
+class TestTimeContextSerialization:
+    def test_valid_shape_three_letter(self):
+        assert PrologInterface._time_to_prolog(
+            {"weekday": "sat", "hour": 20, "minute": 0}
+        ) == "t(sat,20,0)"
+
+    def test_valid_shape_full_english(self):
+        assert PrologInterface._time_to_prolog(
+            {"weekday": "Saturday", "hour": 9, "minute": 30}
+        ) == "t(sat,9,30)"
+
+    def test_missing_key_raises(self):
+        with pytest.raises(TimeShapeError, match="missing required key"):
+            PrologInterface._time_to_prolog({"weekday": "mon", "hour": 10})
+
+    def test_unknown_weekday_raises(self):
+        with pytest.raises(TimeShapeError, match="Unknown weekday"):
+            PrologInterface._time_to_prolog(
+                {"weekday": "blursday", "hour": 10, "minute": 0}
+            )
+
+    def test_hour_out_of_range(self):
+        with pytest.raises(TimeShapeError, match="hour out of range"):
+            PrologInterface._time_to_prolog(
+                {"weekday": "mon", "hour": 24, "minute": 0}
+            )
+        with pytest.raises(TimeShapeError, match="hour out of range"):
+            PrologInterface._time_to_prolog(
+                {"weekday": "mon", "hour": -1, "minute": 0}
+            )
+
+    def test_minute_out_of_range(self):
+        with pytest.raises(TimeShapeError, match="minute out of range"):
+            PrologInterface._time_to_prolog(
+                {"weekday": "mon", "hour": 10, "minute": 60}
+            )
+
+    def test_non_int_hour(self):
+        with pytest.raises(TimeShapeError, match="hour must be an int"):
+            PrologInterface._time_to_prolog(
+                {"weekday": "mon", "hour": "10", "minute": 0}
+            )
+
+    def test_non_dict_input(self):
+        with pytest.raises(TimeShapeError, match="must be a dict"):
+            PrologInterface._time_to_prolog("sat 8pm")
+
+
+class TestActiveTimeSpecs:
+    def test_specs_include_canonical_entries(self):
+        specs = PrologInterface().active_time_specs()
+        for needed in (
+            "morning", "afternoon", "evening", "late_night",
+            "after_sunset", "before_sunset", "weekend", "weekday",
+            "monday", "sunday", "friday_evening",
+        ):
+            assert needed in specs
+
+    def test_specs_deduplicated(self):
+        specs = PrologInterface().active_time_specs()
+        assert len(specs) == len(set(specs))
 
 
 # ------------------------------------------------------------------

@@ -50,6 +50,37 @@ PLAN_FUNCTION = {
                     "synonyms via the ontology and reports any unknown tag back."
                 ),
             },
+            "time_context": {
+                "type": "object",
+                "description": (
+                    "Optional per-query time frame. Emit when the user "
+                    "references a time (\"tonight\", \"this Saturday\", "
+                    "\"at 10 AM\", \"after sunset\"); omit otherwise and the "
+                    "engine will default to the current Bangkok wall-clock "
+                    "injected into your system prompt. Time-gated POI tags "
+                    "(e.g. Jodd Fairs is only `high_density` after sunset; "
+                    "Chatuchak is only `high_density` on weekends) fire or "
+                    "fail based on this frame — so emit it whenever the "
+                    "user pins a time."
+                ),
+                "properties": {
+                    "weekday": {
+                        "type": "string",
+                        "description": (
+                            "Three-letter lowercase day: mon, tue, wed, thu, "
+                            "fri, sat, sun. Full English names also accepted."
+                        ),
+                    },
+                    "hour": {
+                        "type": "integer",
+                        "description": "Hour of day in [0, 23].",
+                    },
+                    "minute": {
+                        "type": "integer",
+                        "description": "Minute of hour in [0, 59].",
+                    },
+                },
+            },
         },
         "required": ["origin", "goal"],
     },

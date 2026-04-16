@@ -157,6 +157,99 @@ def test_handle_plan_finds_temples_from_siam():
         assert "alternatives" in data
 
 
+# ==================================================================
+# _handle_plan — temporal context threading
+# ==================================================================
+
+
+def test_handle_plan_injects_default_time_context():
+    """When the LLM omits time_context, the orchestrator fills it from
+    the Bangkok wall-clock (mocked) and surfaces it in plan data."""
+    orchestrator = make_orchestrator_with_llm_result(
+        ("plan", {"origin": "Siam", "goal": {"any_tag": ["temple"]}}),
+        answer_text="A temple awaits.",
+    )
+    # Freeze the clock to Wed 12:00 so no overrides fire.
+    orchestrator._now_bangkok = lambda: {
+        "weekday": "wed", "hour": 12, "minute": 0,
+    }
+    result, _ = orchestrator.handle("temples")
+    assert result["type"] == "plan"
+    tc = result["data"].get("time_context")
+    assert tc is not None
+    assert tc["weekday"] == "wed"
+    assert tc["hour"] == 12
+    assert tc["minute"] == 0
+    assert tc["display"] == "Wednesday 12:00"
+
+
+def test_handle_plan_respects_llm_time_context():
+    """When the LLM emits its own time_context, the orchestrator uses it
+    verbatim and Jodd Fairs becomes reachable via its after_sunset override."""
+    orchestrator = make_orchestrator_with_llm_result(
+        (
+            "plan",
+            {
+                "origin": "Asok",
+                "goal": {"any_tag": ["night_market"]},
+                "time_context": {"weekday": "sat", "hour": 20, "minute": 0},
+            },
+        ),
+        answer_text="Night market time.",
+    )
+    # Wall-clock is Tuesday 10 AM (no night_market would fire), but the
+    # LLM's time_context must override.
+    orchestrator._now_bangkok = lambda: {
+        "weekday": "tue", "hour": 10, "minute": 0,
+    }
+    result, _ = orchestrator.handle("tonight")
+    assert result["type"] == "plan"
+    tc = result["data"].get("time_context")
+    assert tc["weekday"] == "sat"
+    assert tc["hour"] == 20
+    # jodd_fairs must appear among candidates (as poi or alternative).
+    data = result["data"]
+    surfaced = {data.get("poi")} | set(data.get("alternatives", []))
+    assert "Jodd Fairs Night Market" in surfaced
+
+
+def test_handle_plan_invalid_time_returns_error():
+    """Malformed LLM time_context surfaces as an error response rather
+    than crashing the Prolog call."""
+    orchestrator = make_orchestrator_with_llm_result(
+        (
+            "plan",
+            {
+                "origin": "Siam",
+                "goal": {"any_tag": ["temple"]},
+                "time_context": {"weekday": "blursday", "hour": 10, "minute": 0},
+            },
+        ),
+    )
+    result, _ = orchestrator.handle("anything")
+    assert result["type"] == "error"
+    assert "time_context" in result["data"]["message"].lower() or \
+           "weekday" in result["data"]["message"].lower()
+
+
+def test_handle_time_hint_passed_to_translate():
+    """The LLM's translate_to_query must receive the wall-clock as
+    time_hint so the model can reason about relative time phrases."""
+    orchestrator = make_orchestrator_with_llm_result(
+        ("plan", {"origin": "Siam", "goal": {"route_to": "Asok"}}),
+        answer_text="Routed.",
+    )
+    orchestrator._now_bangkok = lambda: {
+        "weekday": "fri", "hour": 19, "minute": 30,
+    }
+    orchestrator.handle("any input")
+    hint = orchestrator.llm.last_time_hint
+    assert hint is not None
+    assert hint["weekday"] == "fri"
+    assert hint["hour"] == 19
+    assert hint["minute"] == 30
+
+
 def test_handle_plan_preference_score_present_on_prefer_tag():
     orchestrator = make_orchestrator_with_llm_result(
         (

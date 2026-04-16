@@ -1,8 +1,8 @@
-import { AlertTriangle, Info, Sparkles, ChevronDown } from "lucide-react";
+import { AlertTriangle, Clock, Info, Sparkles, ChevronDown } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import RouteSteps from "./RouteSteps";
-import type { PlanData, RouteStep } from "../types";
+import type { PlanData, RouteStep, TimeContext } from "../types";
 import { useTheme } from "../context/ThemeContext";
 
 interface Props {
@@ -17,6 +17,8 @@ export default function PlanResult({ data }: Props) {
   return (
     <div className="space-y-3">
       {header && <div className={`text-sm font-semibold ${colors.text}`}>{header}</div>}
+
+      {data.time_context && <TimeContextBadge ctx={data.time_context} />}
 
       {data.unknown_tags && data.unknown_tags.length > 0 && (
         <UnknownTagsNotice tags={data.unknown_tags} note={data.note} />
@@ -62,6 +64,18 @@ function renderHeader(data: PlanData): string | null {
     return `${left} → ${right}${time}`;
   }
   return null;
+}
+
+function TimeContextBadge({ ctx }: { ctx: TimeContext }) {
+  const { colors } = useTheme();
+  return (
+    <div
+      className={`inline-flex items-center gap-1.5 rounded-lg border ${colors.cardBorder} px-2 py-0.5 text-[11px] ${colors.textMuted}`}
+    >
+      <Clock size={11} />
+      Evaluated for {ctx.display}
+    </div>
+  );
 }
 
 function RelaxationBanner({ notes }: { notes: string[] }) {

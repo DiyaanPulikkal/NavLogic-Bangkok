@@ -24,6 +24,7 @@ in dependency order.
 :- discontiguous station_property/2.
 :- discontiguous poi/3.
 :- discontiguous tagged/2.
+:- discontiguous active_tag/3.
 
 :- consult('ontology.pl').
 :- consult('rules.pl').
@@ -247,3 +248,26 @@ tagged(rca,         [club, indoor, evening, loud_music, high_density]).
 % --- Historic district / street food ---
 poi(chinatown,      'Bangkok Chinatown',             'Wat Mangkon (BL29)').
 tagged(chinatown,   [street_food, market, outdoor, walking_heavy, evening, high_density, photogenic, budget_friendly]).
+
+/* ==================================================================
+   4. Temporal POI overrides
+
+   active_tag(PoiId, Tag, Spec) — a tag is present on a POI only when
+   Spec matches the query's Time context. See has_temporal_override/2
+   + tag_active_at/3 in rules.pl for the shadowing semantics: if ANY
+   active_tag/3 row exists for a (Poi, Tag) pair, the unconditional
+   tagged/2 path for that tag is disabled.
+
+   The tags gated below are ALSO present in the POI's tagged/2 list
+   above. That redundancy is intentional: the override defines the
+   query-time window during which the tag is live, and removing the
+   active_tag/3 fact restores always-on behavior.
+================================================================== */
+
+active_tag(jodd_fairs, high_density, after_sunset).
+active_tag(jodd_fairs, night_market, after_sunset).
+active_tag(chatuchak,  high_density, weekend).
+active_tag(asiatique,  night_market, after_sunset).
+active_tag(wat_arun,   photogenic,   after_sunset).
+active_tag(soi_cowboy, loud_music,   late_night).
+active_tag(rca,        loud_music,   friday_evening).

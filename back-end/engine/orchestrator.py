@@ -32,23 +32,79 @@ from __future__ import annotations
 
 import heapq
 import logging
+from datetime import datetime
 from difflib import SequenceMatcher
+from zoneinfo import ZoneInfo
 
 from engine.llm.llm import LLMInterface
-from engine.prolog import GoalShapeError, PrologInterface
+from engine.prolog import GoalShapeError, PrologInterface, TimeShapeError
 
 logger = logging.getLogger("orchestrator")
+
+_WEEKDAY_BY_PY_INT = {
+    0: "mon", 1: "tue", 2: "wed", 3: "thu",
+    4: "fri", 5: "sat", 6: "sun",
+}
+
+_WEEKDAY_DISPLAY = {
+    "mon": "Monday", "tue": "Tuesday", "wed": "Wednesday", "thu": "Thursday",
+    "fri": "Friday", "sat": "Saturday", "sun": "Sunday",
+}
 
 
 class Orchestrator:
     MAX_REPLAN = 3
     _MATCH_TYPE_RANK = {"exact": 0, "prefix": 1, "substring": 2}
+    _BANGKOK_TZ = ZoneInfo("Asia/Bangkok")
 
     def __init__(self):
         self.llm = LLMInterface()
         self.prolog = PrologInterface()
         self._vocab_cache: list[str] | None = None
         self._synonyms_cache: dict[str, str] | None = None
+
+    # ------------------------------------------------------------------
+    # Temporal context — the per-query time frame.
+    # ------------------------------------------------------------------
+
+    def _now_bangkok(self) -> dict:
+        """Wall-clock `time_context` for Asia/Bangkok.
+
+        Returned as the {weekday, hour, minute} triple the Prolog layer
+        consumes. Kept as an instance method so tests can monkeypatch
+        this single attachment point rather than patching zoneinfo.
+        """
+        now = datetime.now(self._BANGKOK_TZ)
+        return {
+            "weekday": _WEEKDAY_BY_PY_INT[now.weekday()],
+            "hour": now.hour,
+            "minute": now.minute,
+        }
+
+    def _resolve_time_context(self, args: dict) -> dict:
+        """Canonicalize the LLM-supplied or wall-clock time_context.
+
+        Raises TimeShapeError if the LLM emitted a malformed shape —
+        caught in _handle_plan and surfaced as an error response.
+        The returned dict carries a `display` field for the frontend
+        badge ("Saturday 20:00"); the {weekday, hour, minute} subset is
+        what PrologInterface.{candidates,relax} actually serialize.
+        """
+        tc_raw = args.get("time_context") if isinstance(args, dict) else None
+        tc = tc_raw if isinstance(tc_raw, dict) else self._now_bangkok()
+        PrologInterface._time_to_prolog(tc)
+        wd = str(tc["weekday"]).strip().lower()
+        from engine.prolog import _WEEKDAY_CANON
+        canonical = _WEEKDAY_CANON[wd]
+        hour = int(tc["hour"])
+        minute = int(tc["minute"])
+        display = f"{_WEEKDAY_DISPLAY[canonical]} {hour:02d}:{minute:02d}"
+        return {
+            "weekday": canonical,
+            "hour": hour,
+            "minute": minute,
+            "display": display,
+        }
 
     # ------------------------------------------------------------------
     # Top-level dispatch.
@@ -58,8 +114,10 @@ class Orchestrator:
         if history is None:
             history = []
 
+        time_hint = self._now_bangkok()
         result, history = self.llm.translate_to_query(
-            user_input, history, self._vocab(), self._synonyms()
+            user_input, history, self._vocab(), self._synonyms(),
+            time_hint=time_hint,
         )
         if result is None:
             return self._error("Sorry, I couldn't process your request."), history
@@ -123,6 +181,11 @@ class Orchestrator:
         if origin is None:
             return self._error(f"I don't recognize '{origin_raw}' as a station or POI."), history
 
+        try:
+            time_ctx = self._resolve_time_context(args)
+        except TimeShapeError as e:
+            return self._error(f"Malformed time_context: {e}"), history
+
         if self._is_pure_route(goal):
             dest_raw = self._extract_route_to(goal)
             return self._handle_pure_route(origin, dest_raw, history)
@@ -133,12 +196,12 @@ class Orchestrator:
             return self._error(f"Malformed goal: {e}"), history
 
         if unknowns:
-            return self._handle_unknown_tags(origin, unknowns, history)
+            return self._handle_unknown_tags(origin, unknowns, history, time_ctx)
 
-        cands = self.prolog.candidates(goal)
+        cands = self.prolog.candidates(goal, time_ctx)
         relaxation_note: list[str] | None = None
         if not cands:
-            relaxed = self.prolog.relax(goal)
+            relaxed = self.prolog.relax(goal, time_ctx)
             if relaxed is None:
                 return self._answer(
                     "I couldn't find anything matching, even after relaxing your constraints."
@@ -167,6 +230,7 @@ class Orchestrator:
         if chosen is None:
             data = {
                 "origin": origin,
+                "time_context": time_ctx,
                 "relaxation_note": relaxation_note,
                 "audit_trail": audit_trail,
                 "alternatives": [r["name"] for r in ranked[:5]],
@@ -181,6 +245,7 @@ class Orchestrator:
             "total_time": chosen["cost"],
             "steps": chosen["steps"],
             "preference_score": chosen["pref_score"],
+            "time_context": time_ctx,
             "relaxation_note": relaxation_note,
             "audit_trail": audit_trail,
             "alternatives": [
@@ -274,21 +339,22 @@ class Orchestrator:
     # ------------------------------------------------------------------
 
     def _handle_unknown_tags(
-        self, origin: str, unknowns: list[str], history: list
+        self, origin: str, unknowns: list[str], history: list,
+        time_ctx: dict | None = None,
     ) -> tuple[dict, list]:
         sample = ", ".join(self._vocab()[:8])
         note = (
             f"I don't recognize {', '.join(repr(u) for u in unknowns)}. "
             f"Try terms like: {sample}..."
         )
-        result = {
-            "type": "plan",
-            "data": {
-                "origin": origin,
-                "unknown_tags": unknowns,
-                "note": note,
-            },
+        data = {
+            "origin": origin,
+            "unknown_tags": unknowns,
+            "note": note,
         }
+        if time_ctx is not None:
+            data["time_context"] = time_ctx
+        result = {"type": "plan", "data": data}
         return self._format(result, history)
 
     # ------------------------------------------------------------------

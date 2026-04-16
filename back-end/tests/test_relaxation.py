@@ -12,6 +12,7 @@ satisfied. These tests lock in:
 """
 
 from engine.prolog import PrologInterface
+from tests.helpers import DEFAULT_TIME_CTX
 
 
 class TestRelaxDrops:
@@ -24,8 +25,8 @@ class TestRelaxDrops:
                 {"any_tag": ["nightlife"]},
             ]
         }
-        assert p.candidates(goal) == []
-        relaxed = p.relax(goal)
+        assert p.candidates(goal, DEFAULT_TIME_CTX) == []
+        relaxed = p.relax(goal, DEFAULT_TIME_CTX)
         assert relaxed is not None
         dropped, survivors = relaxed
         assert len(dropped) >= 1
@@ -40,7 +41,7 @@ class TestRelaxDrops:
                 {"any_tag": ["nightlife"]},
             ]
         }
-        relaxed = p.relax(goal)
+        relaxed = p.relax(goal, DEFAULT_TIME_CTX)
         assert relaxed is not None
         dropped, _ = relaxed
         for d in dropped:
@@ -57,7 +58,7 @@ class TestRelaxDrops:
                 {"any_tag": ["nightlife"]},
             ]
         }
-        _dropped, survivors = p.relax(goal)
+        _dropped, survivors = p.relax(goal, DEFAULT_TIME_CTX)
         for s in survivors:
             assert set(s.keys()) == {"name", "station", "pref_score"}
             assert isinstance(s["pref_score"], int)
@@ -74,18 +75,38 @@ class TestRelaxDrops:
                 {"all_tag": ["nightlife", "budget_friendly"]},
             ]
         }
-        relaxed = p.relax(goal)
+        relaxed = p.relax(goal, DEFAULT_TIME_CTX)
         assert relaxed is not None
         dropped, _ = relaxed
         # Minimal drop ⇒ dropped list never contains *both* original conjuncts.
         assert len(dropped) < 2
+
+    def test_time_gated_conjunct_is_relaxable(self):
+        """At Tue 10:00, night_market-gated POIs (jodd_fairs, asiatique) are
+        silent because after_sunset fails. A goal joining night_market with an
+        unconditional shopping filter should relax by dropping the night_market
+        conjunct and surfacing unconditional shopping POIs."""
+        p = PrologInterface()
+        goal = {
+            "and": [
+                {"any_tag": ["night_market"]},
+                {"any_tag": ["shopping"]},
+            ]
+        }
+        tue_morning = {"weekday": "tue", "hour": 10, "minute": 0}
+        assert p.candidates(goal, tue_morning) == []
+        relaxed = p.relax(goal, tue_morning)
+        assert relaxed is not None
+        dropped, survivors = relaxed
+        assert any("night_market" in d for d in dropped)
+        assert len(survivors) > 0
 
 
 class TestRelaxNone:
     def test_route_to_nonexistent_returns_none(self):
         """route_to can't be relaxed to something meaningful."""
         p = PrologInterface()
-        assert p.relax({"route_to": "Narnia (XX)"}) is None
+        assert p.relax({"route_to": "Narnia (XX)"}, DEFAULT_TIME_CTX) is None
 
     def test_already_satisfied_goal_still_relaxes_or_noops(self):
         """A goal that already has candidates either returns None or some
@@ -94,7 +115,7 @@ class TestRelaxNone:
         goal = {"any_tag": ["temple"]}
         # No assertion on result — relax may or may not fire on a satisfied
         # goal; we only verify it doesn't raise and returns a valid shape.
-        result = p.relax(goal)
+        result = p.relax(goal, DEFAULT_TIME_CTX)
         if result is not None:
             dropped, survivors = result
             assert isinstance(dropped, list)

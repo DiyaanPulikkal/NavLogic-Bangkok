@@ -13,9 +13,15 @@ Three responsibilities live here:
 
   1. Symbolic name resolution      — match_station/3
   2. Path → ride/transfer steps    — route_steps/2 + helpers
-  3. Logical-form reasoning        — satisfies/2, candidates/2,
-                                     preference_score/3, relax/3,
+  3. Logical-form reasoning        — satisfies/3, candidates/3,
+                                     preference_score/4, relax/4,
                                      audit_route/3, unknown_tags/2
+
+  The third group threads a Time argument (a t(Weekday, Hour, Minute)
+  compound) through every tag check, so time-gated POI facts
+  (active_tag/3 in knowledge_base.pl) contribute conditionally. The
+  time layer is closed-vocabulary (see ontology.pl); the goal grammar
+  and tag vocabulary remain open.
 
 The first two are kept because they are genuine symbolic work that
 would be ugly in Python. The third is the neuro-symbolic core: the
@@ -100,16 +106,57 @@ extend_ride(Line, Board, Acc, [C, D | Rest], Steps) :-
    3. Logical-form reasoning (the open-vocabulary core)
 ================================================================== */
 
-/* poi_has_tag/2 — tag membership respecting subsumption.
+/* poi_has_tag/2 — unconditional tag membership respecting subsumption.
    A POI tagged `temple` matches a query for `religious_site` because
    subtag(temple, religious_site) is in the ontology.
+
+   This is the always-on baseline. Time-gated membership goes through
+   tag_active_at/3 below, which shadows this predicate when an
+   active_tag/3 override exists.
 */
 poi_has_tag(Poi, Tag) :-
     tagged(Poi, Tags),
     member(T, Tags),
     is_a(T, Tag).
 
-/* satisfies/2 — recursive evaluator for goal terms.
+/* ------------------------------------------------------------------
+   Temporal tag gating — the override-wins binding layer.
+
+   has_temporal_override(Poi, Tag) is true iff any active_tag/3 row
+   exists for the (Poi, Tag) pair (across any spec). When true, the
+   unconditional poi_has_tag/2 path is shadowed: ONLY the time-gated
+   clauses count. Without this guard, a POI that has both
+   `tagged(p, [photogenic])` and `active_tag(p, photogenic, after_sunset)`
+   would silently satisfy `photogenic` at 10 AM through the fallback
+   branch, making the time-gate a no-op.
+
+   tag_active_at(Poi, Tag, Time) is the predicate every satisfies/3
+   tag clause calls. The first clause handles overridden tags (spec
+   must match Time); the second delegates to poi_has_tag/2 for tags
+   that are not temporally gated.
+
+   Note on subsumption: active_tag/3 is matched at the canonical
+   (post-bind_tag) tag level, not propagated up the is_a/2 chain.
+   A query for `cultural` against a POI whose only override is
+   active_tag(p, temple, evening) will resolve through the
+   unconditional poi_has_tag path — the temple-specific time gate
+   does not propagate to cultural. All demo overrides target leaf-ish
+   tags (high_density, night_market, photogenic, loud_music) so this
+   is a deliberate scoping choice, not a bug.
+------------------------------------------------------------------ */
+
+has_temporal_override(Poi, Tag) :- active_tag(Poi, Tag, _), !.
+
+tag_active_at(Poi, Tag, Time) :-
+    has_temporal_override(Poi, Tag),
+    !,
+    active_tag(Poi, Tag, Spec),
+    time_matches(Spec, Time).
+tag_active_at(Poi, Tag, _) :-
+    \+ has_temporal_override(Poi, Tag),
+    poi_has_tag(Poi, Tag).
+
+/* satisfies/3 — recursive evaluator for goal terms under a Time context.
 
    Goal grammar (mirrors the JSON the LLM emits, serialized to
    Prolog terms by Python):
@@ -117,52 +164,54 @@ poi_has_tag(Poi, Tag) :-
      and(Gs)         conjunction
      or(Gs)          disjunction
      not(G)          negation
-     any_tag(Ts)     POI has at least one of Ts
-     all_tag(Ts)     POI has every tag in Ts
-     none_tag(Ts)    POI has none of Ts (HARD constraint)
-     prefer_tag(Ts)  soft preference (always satisfies; scored later)
+     any_tag(Ts)     POI has at least one of Ts   (time-gated)
+     all_tag(Ts)     POI has every tag in Ts      (time-gated)
+     none_tag(Ts)    POI has none of Ts           (time-gated, HARD)
+     prefer_tag(Ts)  soft preference              (time-gated scoring)
      route_to(_)     handled by orchestrator, not by candidate filter
 
+   Time is a t(Weekday, Hour, Minute) compound threaded by callers.
    Tags pass through bind_tag/2 (defined in ontology.pl) so synonyms
-   and unknown vocabulary are handled uniformly.
+   and unknown vocabulary are handled uniformly; presence is checked
+   via tag_active_at/3 so time-gated overrides take effect.
 */
 
-satisfies(_,   any_tag([])) :- fail.
-satisfies(Poi, any_tag([T | _Ts])) :-
+satisfies(_,   any_tag([]), _) :- fail.
+satisfies(Poi, any_tag([T | _Ts]), Time) :-
     bind_tag(T, B),
     \+ B = unknown(_),
-    poi_has_tag(Poi, B),
+    tag_active_at(Poi, B, Time),
     !.
-satisfies(Poi, any_tag([_ | Ts])) :-
-    satisfies(Poi, any_tag(Ts)).
+satisfies(Poi, any_tag([_ | Ts]), Time) :-
+    satisfies(Poi, any_tag(Ts), Time).
 
-satisfies(_,   all_tag([])).
-satisfies(Poi, all_tag(Ts)) :-
+satisfies(_,   all_tag([]), _).
+satisfies(Poi, all_tag(Ts), Time) :-
     forall(member(T, Ts),
            ( bind_tag(T, B),
              \+ B = unknown(_),
-             poi_has_tag(Poi, B) )).
+             tag_active_at(Poi, B, Time) )).
 
-satisfies(_,   none_tag([])).
-satisfies(Poi, none_tag(Ts)) :-
+satisfies(_,   none_tag([]), _).
+satisfies(Poi, none_tag(Ts), Time) :-
     forall(member(T, Ts),
            ( bind_tag(T, B),
              ( B = unknown(_)
              -> true
-             ;  \+ poi_has_tag(Poi, B) ) )).
+             ;  \+ tag_active_at(Poi, B, Time) ) )).
 
-satisfies(Poi, and(Gs)) :-
-    forall(member(G, Gs), satisfies(Poi, G)).
+satisfies(Poi, and(Gs), Time) :-
+    forall(member(G, Gs), satisfies(Poi, G, Time)).
 
-satisfies(Poi, or(Gs)) :-
+satisfies(Poi, or(Gs), Time) :-
     member(G, Gs),
-    satisfies(Poi, G).
+    satisfies(Poi, G, Time).
 
-satisfies(Poi, not(G)) :-
-    \+ satisfies(Poi, G).
+satisfies(Poi, not(G), Time) :-
+    \+ satisfies(Poi, G, Time).
 
-satisfies(_, prefer_tag(_)).   /* preferences never block; scored separately */
-satisfies(_, route_to(_)).     /* orchestrator handles routing intent */
+satisfies(_, prefer_tag(_), _).   /* preferences never block; scored separately */
+satisfies(_, route_to(_),   _).   /* orchestrator handles routing intent */
 
 /* ------------------------------------------------------------------
    Soft preference scoring.
@@ -177,29 +226,29 @@ sub_goal(and(Gs), Sub) :- member(G, Gs), sub_goal(G, Sub).
 sub_goal(or(Gs),  Sub) :- member(G, Gs), sub_goal(G, Sub).
 sub_goal(not(G),  Sub) :- sub_goal(G, Sub).
 
-preference_score(Poi, Goal, Score) :-
+preference_score(Poi, Goal, Time, Score) :-
     findall(1,
             ( sub_goal(Goal, prefer_tag(Ts)),
               member(T, Ts),
               bind_tag(T, B),
               \+ B = unknown(_),
-              poi_has_tag(Poi, B) ),
+              tag_active_at(Poi, B, Time) ),
             Hits),
     length(Hits, Score).
 
 /* ------------------------------------------------------------------
-   candidates/2 — the headline query.
+   candidates/3 — the headline query, time-aware.
 
-   Returns Name-Station-Score for every POI satisfying Goal, with
-   its preference score. Empty result triggers relax/3 in the
-   orchestrator.
+   Returns Name-Station-Score for every POI satisfying Goal under
+   Time, with its preference score. Empty result triggers relax/4
+   in the orchestrator.
 ------------------------------------------------------------------ */
 
-candidates(Goal, Cands) :-
+candidates(Goal, Time, Cands) :-
     findall(Name-Station-Score,
             ( poi(Id, Name, Station),
-              satisfies(Id, Goal),
-              preference_score(Id, Goal, Score) ),
+              satisfies(Id, Goal, Time),
+              preference_score(Id, Goal, Time, Score) ),
             Cands).
 
 /* ------------------------------------------------------------------
@@ -256,15 +305,15 @@ unknown_tags(Goal, Unknowns) :-
    space sane for the demo.
 ------------------------------------------------------------------ */
 
-relax(and(Gs), [Drop], Survivors) :-
+relax(and(Gs), Time, [Drop], Survivors) :-
     select(Drop, Gs, Rest),
-    candidates(and(Rest), Survivors),
+    candidates(and(Rest), Time, Survivors),
     Survivors \= [].
 
-relax(and(Gs), [D1, D2], Survivors) :-
+relax(and(Gs), Time, [D1, D2], Survivors) :-
     select(D1, Gs, R1),
     select(D2, R1, R2),
-    candidates(and(R2), Survivors),
+    candidates(and(R2), Time, Survivors),
     Survivors \= [].
 
 /* ------------------------------------------------------------------

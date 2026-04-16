@@ -106,6 +106,13 @@ class AuditEntry(BaseModel):
     violations: list[dict]
 
 
+class TimeContext(BaseModel):
+    weekday: str
+    hour: int
+    minute: int
+    display: str
+
+
 class PlanData(BaseModel):
     origin: str
     destination: str | None = None
@@ -113,6 +120,7 @@ class PlanData(BaseModel):
     total_time: int | None = None
     steps: list[dict] = []
     preference_score: int | None = None
+    time_context: TimeContext | None = None
     relaxation_note: list[str] | None = None
     audit_trail: list[AuditEntry] | None = None
     alternatives: list[str] | None = None

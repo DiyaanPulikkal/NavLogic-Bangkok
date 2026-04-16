@@ -41,6 +41,13 @@ export interface AuditEntry {
   violations: { step: RouteStep; reason: string }[];
 }
 
+export interface TimeContext {
+  weekday: string;
+  hour: number;
+  minute: number;
+  display: string;
+}
+
 export interface PlanData {
   origin: string;
   destination?: string;
@@ -48,6 +55,7 @@ export interface PlanData {
   total_time?: number;
   steps?: RouteStep[];
   preference_score?: number;
+  time_context?: TimeContext | null;
   relaxation_note?: string[] | null;
   audit_trail?: AuditEntry[] | null;
   alternatives?: string[] | null;

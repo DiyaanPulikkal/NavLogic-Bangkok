@@ -58,8 +58,15 @@ class LLMInterface:
         history: list,
         vocab: list[str] | None = None,
         synonyms: dict[str, str] | None = None,
+        time_hint: dict | None = None,
     ):
         """Send `user_input` to Gemini with vocab-aware system prompt.
+
+        `time_hint` is the default Bangkok wall-clock the orchestrator
+        passes in so the LLM can reason about "tonight" / "tomorrow
+        morning" even when the user does not pin a time. It is rendered
+        into the system prompt; the LLM may override by emitting its
+        own time_context in the function call.
 
         Returns:
           ((function_name, args_dict), new_history) when Gemini emits a function call,
@@ -71,7 +78,7 @@ class LLMInterface:
             new_history.append(
                 types.Content(role="user", parts=[types.Part(text=user_input)])
             )
-            config = self._build_config(vocab, synonyms)
+            config = self._build_config(vocab, synonyms, time_hint)
             logger.info("Sending query to Gemini...")
             response = self.client.models.generate_content(
                 model=self.model,
@@ -152,8 +159,13 @@ class LLMInterface:
         self,
         vocab: list[str] | None,
         synonyms: dict[str, str] | None,
+        time_hint: dict | None = None,
     ) -> types.GenerateContentConfig:
-        prompt = self.static_prompt + self._render_vocab(vocab, synonyms)
+        prompt = (
+            self.static_prompt
+            + self._render_vocab(vocab, synonyms)
+            + self._render_time_hint(time_hint)
+        )
         return types.GenerateContentConfig(
             system_instruction=prompt,
             tools=[self.tools],
@@ -179,6 +191,28 @@ class LLMInterface:
                 + "\n"
             )
         return "".join(out)
+
+    @staticmethod
+    def _render_time_hint(time_hint: dict | None) -> str:
+        """Inject the current Bangkok wall-clock into the system prompt.
+
+        The orchestrator always passes a time_hint, so the LLM has a
+        ground frame for relative phrases ("tonight", "tomorrow") even
+        when the user doesn't mention time. If the user *does* pin a
+        time, the LLM overrides by emitting its own time_context in the
+        function call.
+        """
+        if not time_hint:
+            return ""
+        wd = time_hint.get("weekday", "?")
+        hour = time_hint.get("hour", 0)
+        minute = time_hint.get("minute", 0)
+        return (
+            f"\n[Current time in Bangkok]: weekday={wd}, "
+            f"{hour:02d}:{minute:02d} "
+            f"(emit time_context={{weekday, hour, minute}} when the user "
+            f"pins a time; omit it to default to this frame)\n"
+        )
 
     @staticmethod
     def _args_to_python(args) -> dict:

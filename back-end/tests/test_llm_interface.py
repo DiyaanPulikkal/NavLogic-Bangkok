@@ -230,6 +230,70 @@ def test_system_prompt_includes_vocab_and_synonyms(monkeypatch):
     assert "budget_friendly" in system_instruction
 
 
+def test_system_prompt_includes_time_hint(monkeypatch):
+    """time_hint must be rendered into the system instruction so the LLM
+    has a ground frame for relative phrases like 'tonight'."""
+    response = SimpleNamespace(
+        candidates=[FakeCandidate([FakePart(text="hi")])]
+    )
+    capture: dict = {}
+    _install_fake_client(monkeypatch, response=response, capture=capture)
+
+    llm = llm_module.LLMInterface()
+    llm.translate_to_query(
+        "hi", [],
+        vocab=["temple"], synonyms={"sweaty": "weather_exposed"},
+        time_hint={"weekday": "fri", "hour": 19, "minute": 30},
+    )
+
+    si = capture.get("_config_calls", [])[-1]["system_instruction"]
+    assert "[Current time in Bangkok]" in si
+    assert "fri" in si
+    assert "19:30" in si
+
+
+def test_system_prompt_omits_time_hint_when_none(monkeypatch):
+    """No time_hint → no rendered '[Current time in Bangkok]: weekday=...'
+    line. The static prompt itself references the marker in its teaching
+    block, so we check for the rendered `weekday=` pattern the helper
+    emits, which only appears when a hint is supplied."""
+    response = SimpleNamespace(
+        candidates=[FakeCandidate([FakePart(text="hi")])]
+    )
+    capture: dict = {}
+    _install_fake_client(monkeypatch, response=response, capture=capture)
+
+    llm = llm_module.LLMInterface()
+    llm.translate_to_query("hi", [], vocab=None, synonyms=None, time_hint=None)
+
+    si = capture.get("_config_calls", [])[-1]["system_instruction"]
+    assert "[Current time in Bangkok]: weekday=" not in si
+
+
+def test_translate_accepts_time_context_arg(monkeypatch):
+    """The LLM may emit a time_context field on the function call; the
+    coercion path must preserve it through to the orchestrator."""
+    goal = {"any_tag": ["night_market"]}
+    function_call = FakeFunctionCall(
+        "plan",
+        {
+            "origin": "Asok",
+            "goal": goal,
+            "time_context": {"weekday": "sat", "hour": 20, "minute": 0},
+        },
+    )
+    response = SimpleNamespace(
+        candidates=[FakeCandidate([FakePart(function_call=function_call)])]
+    )
+    _install_fake_client(monkeypatch, response=response)
+
+    llm = llm_module.LLMInterface()
+    (fn, args), _ = llm.translate_to_query("tonight", [], [], {})
+
+    assert fn == "plan"
+    assert args["time_context"] == {"weekday": "sat", "hour": 20, "minute": 0}
+
+
 def test_system_prompt_omits_vocab_section_when_empty(monkeypatch):
     response = SimpleNamespace(
         candidates=[FakeCandidate([FakePart(text="hi")])]

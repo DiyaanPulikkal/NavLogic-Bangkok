@@ -22,6 +22,12 @@ Also exported:
 from engine.orchestrator import Orchestrator
 from engine.prolog import PrologInterface
 
+# Neutral wall-clock for non-temporal tests: Wednesday, 12:00 PM.
+# No active_tag/3 override fires at this frame (after_sunset, weekend,
+# late_night, friday_evening all fail), so existing specs behave
+# identically to the pre-temporal-layer world.
+DEFAULT_TIME_CTX = {"weekday": "wed", "hour": 12, "minute": 0}
+
 
 class OrchestratorNoLLM(Orchestrator):
     """Orchestrator with llm=None; Prolog loaded from the real KB."""
@@ -44,10 +50,14 @@ class StubLLM:
     def __init__(self, result, answer_text: str | None = None):
         self._result = result
         self._answer_text = answer_text
+        self.last_time_hint: dict | None = None
 
-    def translate_to_query(self, user_input, history=None, vocab=None, synonyms=None):
+    def translate_to_query(
+        self, user_input, history=None, vocab=None, synonyms=None, time_hint=None,
+    ):
         if history is None:
             history = []
+        self.last_time_hint = time_hint
         return self._result, history
 
     def format_result(self, result, history=None, vocab=None, synonyms=None):
@@ -64,9 +74,20 @@ def make_orchestrator_with_llm_result(result, answer_text: str | None = None):
     return orchestrator
 
 
-def make_plan_stub(origin: str, goal: dict, answer_text: str | None = None):
-    """Shorthand: stub LLM that emits `plan(origin=..., goal=...)`."""
-    return StubLLM(("plan", {"origin": origin, "goal": goal}), answer_text)
+def make_plan_stub(
+    origin: str, goal: dict, answer_text: str | None = None,
+    time_context: dict | None = None,
+):
+    """Shorthand: stub LLM that emits `plan(origin=..., goal=...)`.
+
+    `time_context` is optional; when supplied, it rides inside the
+    function-call args exactly as the real Gemini output would, so the
+    orchestrator's _resolve_time_context path is exercised.
+    """
+    args: dict = {"origin": origin, "goal": goal}
+    if time_context is not None:
+        args["time_context"] = time_context
+    return StubLLM(("plan", args), answer_text)
 
 
 def build_graph_and_weights(edges):
