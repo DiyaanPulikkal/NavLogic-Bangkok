@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>From Vanilla to NavLogic — Understanding the Meta-Interpreter</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600;700;800&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', sans-serif;
+    background: #f0f4fa;
+    color: #2d3748;
+    line-height: 1.7;
+    padding: 40px 20px;
+  }
+
+  .container { max-width: 1150px; margin: 0 auto; }
+
+  h1 {
+    font-size: 2rem;
+    font-weight: 800;
+    text-align: center;
+    margin-bottom: 6px;
+    background: linear-gradient(135deg, #4a6cf7, #6cb4ee);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .subtitle {
+    text-align: center;
+    color: #7a8ba8;
+    font-size: 0.95rem;
+    margin-bottom: 48px;
+  }
+
+  /* Section styling */
+  .section {
+    margin-bottom: 48px;
+  }
+
+  .section-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 2.5px;
+    font-weight: 700;
+    margin-bottom: 12px;
+  }
+
+  .section-label.part1 { color: #6d5acf; }
+  .section-label.part2 { color: #0891b2; }
+  .section-label.part3 { color: #059669; }
+  .section-label.part4 { color: #dc2626; }
+
+  h2 {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: #1e293b;
+    margin-bottom: 20px;
+  }
+
+  .prose {
+    color: #475569;
+    font-size: 0.92rem;
+    margin-bottom: 20px;
+    line-height: 1.8;
+  }
+
+  .prose strong { color: #1e293b; }
+
+  .highlight-text {
+    background: #fef3cd;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+    color: #92600a;
+  }
+
+  /* Code blocks */
+  .code-block {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    background: #f7f9fc;
+    border: 1px solid #d4e0f0;
+    border-radius: 10px;
+    padding: 20px 24px;
+    margin: 16px 0;
+    overflow-x: auto;
+    line-height: 1.9;
+    white-space: pre-wrap;
+    color: #334155;
+  }
+
+  .code-block .cm { color: #94a3b8; }
+  .code-block .kw { color: #dc2626; font-weight: 600; }
+  .code-block .fn { color: #6d5acf; font-weight: 600; }
+  .code-block .op { color: #b8860b; }
+  .code-block .str { color: #2563eb; }
+  .code-block .tag { color: #059669; font-weight: 600; }
+  .code-block .hi { background: #fef3cd; padding: 1px 4px; border-radius: 3px; }
+
+  code {
+    font-family: 'JetBrains Mono', monospace;
+    background: #e8f0fe;
+    padding: 2px 7px;
+    border-radius: 4px;
+    color: #3b5998;
+    font-size: 0.84rem;
+  }
+
+  /* Side-by-side comparison */
+  .comparison {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin: 20px 0;
+  }
+
+  @media (max-width: 768px) {
+    .comparison { grid-template-columns: 1fr; }
+  }
+
+  .compare-card {
+    background: #ffffff;
+    border: 1px solid #d4e0f0;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 1px 4px rgba(74,108,247,0.06);
+  }
+
+  .compare-card-header {
+    padding: 14px 20px;
+    font-weight: 700;
+    font-size: 0.85rem;
+    letter-spacing: 0.5px;
+  }
+
+  .compare-card-header.vanilla { background: #ede9fe; color: #6d5acf; }
+  .compare-card-header.navlogic { background: #d4f1f9; color: #0891b2; }
+
+  .compare-card .code-block {
+    margin: 0;
+    border: none;
+    border-radius: 0;
+    border-top: 1px solid #d4e0f0;
+  }
+
+  /* Mapping arrows */
+  .mapping-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 0.84rem;
+    margin: 20px 0;
+    background: #ffffff;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid #d4e0f0;
+    box-shadow: 0 1px 4px rgba(74,108,247,0.06);
+  }
+
+  .mapping-table th {
+    padding: 14px 20px;
+    text-align: left;
+    font-weight: 700;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .mapping-table th:nth-child(1) { background: #ede9fe; color: #6d5acf; }
+  .mapping-table th:nth-child(2) { background: #e2ebf5; color: #5a6b83; }
+  .mapping-table th:nth-child(3) { background: #d4f1f9; color: #0891b2; }
+
+  .mapping-table td {
+    padding: 12px 20px;
+    border-top: 1px solid #e8f0fe;
+    vertical-align: top;
+  }
+
+  .mapping-table td:nth-child(2) {
+    text-align: center;
+    color: #94a3b8;
+    font-size: 1.2rem;
+  }
+
+  .mapping-table tr:hover td { background: #f7f9fc; }
+
+  /* AST Tree visualization */
+  .tree-container {
+    background: #ffffff;
+    border: 1px solid #d4e0f0;
+    border-radius: 16px;
+    padding: 32px;
+    margin: 24px 0;
+    box-shadow: 0 1px 4px rgba(74,108,247,0.06);
+    overflow-x: auto;
+  }
+
+  .tree-title {
+    text-align: center;
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: #1e293b;
+    margin-bottom: 24px;
+  }
+
+  .tree-title small { color: #7a8ba8; font-weight: 400; }
+
+  .tree-svg {
+    display: block;
+    margin: 0 auto;
+  }
+
+  /* Step-by-step trace */
+  .trace-steps {
+    counter-reset: trace-step;
+    margin: 20px 0;
+  }
+
+  .trace-step {
+    background: #ffffff;
+    border: 1px solid #d4e0f0;
+    border-radius: 12px;
+    padding: 20px 24px 20px 70px;
+    margin-bottom: 12px;
+    position: relative;
+    box-shadow: 0 1px 4px rgba(74,108,247,0.06);
+    transition: border-color 0.2s;
+  }
+
+  .trace-step:hover { border-color: #8ab4f8; }
+
+  .trace-step::before {
+    counter-increment: trace-step;
+    content: counter(trace-step);
+    position: absolute;
+    left: 20px;
+    top: 18px;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.85rem;
+  }
+
+  .trace-step.match::before { background: #d4f1f9; color: #0891b2; }
+  .trace-step.recurse::before { background: #ede9fe; color: #6d5acf; }
+  .trace-step.leaf::before { background: #d1fae5; color: #059669; }
+  .trace-step.fail::before { background: #fee2e2; color: #dc2626; }
+  .trace-step.result::before { background: #fef3cd; color: #92600a; }
+
+  .trace-step .step-title {
+    font-weight: 700;
+    font-size: 0.9rem;
+    color: #1e293b;
+    margin-bottom: 6px;
+  }
+
+  .trace-step .step-detail {
+    color: #5a6b83;
+    font-size: 0.85rem;
+    line-height: 1.7;
+  }
+
+  .trace-step .step-code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+    background: #f7f9fc;
+    border: 1px solid #e2ebf5;
+    padding: 10px 14px;
+    border-radius: 6px;
+    margin-top: 10px;
+    color: #334155;
+    white-space: pre-wrap;
+  }
+
+  /* Eureka box */
+  .eureka {
+    background: linear-gradient(135deg, #e8f0fe, #dce8f8);
+    border: 2px solid #8ab4f8;
+    border-radius: 16px;
+    padding: 28px 32px;
+    margin: 32px 0;
+  }
+
+  .eureka h3 {
+    font-size: 1.05rem;
+    color: #2563eb;
+    margin-bottom: 12px;
+  }
+
+  .eureka p {
+    color: #334155;
+    font-size: 0.92rem;
+    line-height: 1.8;
+  }
+
+  /* Distinction callout */
+  .callout {
+    background: #ffffff;
+    border-left: 4px solid;
+    border-radius: 0 10px 10px 0;
+    padding: 20px 24px;
+    margin: 20px 0;
+    box-shadow: 0 1px 4px rgba(74,108,247,0.06);
+  }
+
+  .callout.key { border-left-color: #4a6cf7; }
+  .callout.warn { border-left-color: #dc2626; }
+  .callout.good { border-left-color: #059669; }
+
+  .callout .callout-title {
+    font-weight: 700;
+    font-size: 0.85rem;
+    margin-bottom: 6px;
+  }
+
+  .callout.key .callout-title { color: #4a6cf7; }
+  .callout.warn .callout-title { color: #dc2626; }
+  .callout.good .callout-title { color: #059669; }
+
+  .callout p {
+    color: #5a6b83;
+    font-size: 0.88rem;
+  }
+
+  /* Separator */
+  .divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, #c5d5ea, transparent);
+    margin: 48px 0;
+  }
+
+  /* Node badges for inline use */
+  .node-badge {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 6px;
+  }
+
+  .node-badge.and-b { background: #dbeafe; color: #2563eb; }
+  .node-badge.or-b { background: #ede9fe; color: #6d5acf; }
+  .node-badge.not-b { background: #fee2e2; color: #dc2626; }
+  .node-badge.any-b { background: #d1fae5; color: #059669; }
+  .node-badge.none-b { background: #fee2e2; color: #dc2626; }
+  .node-badge.prefer-b { background: #fef3cd; color: #92600a; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <h1>From Vanilla to NavLogic</h1>
+  <p class="subtitle">Understanding why <code>satisfies/3</code> is a meta-interpreter — not just another predicate</p>
+
+  <!-- ============================================================ -->
+  <!-- PART 1: What you already know -->
+  <!-- ============================================================ -->
+  <div class="section">
+    <div class="section-label part1">Part 1 — What You Already Know</div>
+    <h2>The Vanilla Meta-Interpreter</h2>
+
+    <p class="prose">
+      You've seen this in class. The vanilla meta-interpreter is a Prolog program
+      that <strong>interprets Prolog itself</strong>. It takes a goal — not as something to
+      <em>execute</em>, but as a <strong>data term to inspect</strong> — and decides what to do
+      by pattern-matching on its structure:
+    </p>
+
+    <div class="code-block">
+<span class="fn">solve</span>(<span class="kw">true</span>).
+<span class="fn">solve</span>((<span class="op">A</span>, <span class="op">B</span>))  :- <span class="fn">solve</span>(<span class="op">A</span>), <span class="fn">solve</span>(<span class="op">B</span>).        <span class="cm">% conjunction: solve both</span>
+<span class="fn">solve</span>((<span class="op">A</span> ; <span class="op">B</span>))  :- <span class="fn">solve</span>(<span class="op">A</span>) ; <span class="fn">solve</span>(<span class="op">B</span>).        <span class="cm">% disjunction: solve either</span>
+<span class="fn">solve</span>(<span class="op">G</span>)        :- clause(<span class="op">G</span>, <span class="op">Body</span>), <span class="fn">solve</span>(<span class="op">Body</span>). <span class="cm">% atom: look up clause, recurse</span></div>
+
+    <p class="prose">
+      The magic word is <span class="highlight-text">level shift</span>. In normal Prolog, when you write
+      <code>parent(X, Y), ancestor(Y, Z)</code>, the comma is Prolog's <em>own</em> conjunction —
+      the engine handles it. But in the meta-interpreter, <code>(A, B)</code> is a
+      <strong>functor being inspected as data</strong>. The interpreter <em>sees</em> the comma,
+      <em>decides</em> it means "solve both sides," and <em>recurses</em>. The logic is the same,
+      but the <strong>level of control</strong> has shifted: from the engine to your code.
+    </p>
+
+    <div class="callout key">
+      <div class="callout-title">The Key Idea</div>
+      <p>
+        A meta-interpreter treats <strong>logical formulas as data</strong> and evaluates
+        them by <strong>structural recursion</strong>. It reads the shape of the formula
+        (is it a conjunction? a disjunction? an atom?) and acts accordingly.
+      </p>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- ============================================================ -->
+  <!-- PART 2: The Parallel -->
+  <!-- ============================================================ -->
+  <div class="section">
+    <div class="section-label part2">Part 2 — The Parallel</div>
+    <h2>NavLogic's <code>satisfies/3</code> Does the Same Thing — for a Different Language</h2>
+
+    <p class="prose">
+      The vanilla interpreter evaluates <strong>Prolog goals</strong>. NavLogic's <code>satisfies/3</code>
+      evaluates <strong>its own goal grammar</strong> — a tree of operators like
+      <span class="node-badge and-b">and</span>
+      <span class="node-badge or-b">or</span>
+      <span class="node-badge not-b">not</span>
+      <span class="node-badge any-b">any_tag</span>
+      <span class="node-badge none-b">none_tag</span>
+      <span class="node-badge prefer-b">prefer_tag</span>
+      that arrives from the LLM as a data term. Same technique, different object language.
+    </p>
+
+    <div class="comparison">
+      <div class="compare-card">
+        <div class="compare-card-header vanilla">Vanilla Meta-Interpreter</div>
+        <div class="code-block">
+<span class="fn">solve</span>(<span class="kw">true</span>).
+
+<span class="fn">solve</span>((<span class="op">A</span>, <span class="op">B</span>)) :-
+    <span class="fn">solve</span>(<span class="op">A</span>),
+    <span class="fn">solve</span>(<span class="op">B</span>).
+
+<span class="fn">solve</span>(\+ <span class="op">G</span>) :-
+    \+ <span class="fn">solve</span>(<span class="op">G</span>).
+
+<span class="fn">solve</span>(<span class="op">G</span>) :-
+    clause(<span class="op">G</span>, <span class="op">Body</span>),
+    <span class="fn">solve</span>(<span class="op">Body</span>).</div>
+      </div>
+      <div class="compare-card">
+        <div class="compare-card-header navlogic">NavLogic's satisfies/3</div>
+        <div class="code-block">
+<span class="cm">% (prefer_tag always true — like "true")</span>
+<span class="fn">satisfies</span>(_, <span class="kw">prefer_tag</span>(_), _).
+
+<span class="fn">satisfies</span>(Poi, <span class="kw">and</span>(Gs), T) :-
+    forall(member(G,Gs),
+           <span class="fn">satisfies</span>(Poi, G, T)).
+
+<span class="fn">satisfies</span>(Poi, <span class="kw">not</span>(G), T) :-
+    \+ <span class="fn">satisfies</span>(Poi, G, T).
+
+<span class="fn">satisfies</span>(Poi, <span class="kw">any_tag</span>(Ts), T) :-
+    member(Tag, Ts),
+    <span class="tag">bind_tag</span>(Tag, B), ...
+    <span class="tag">tag_active_at</span>(Poi, B, T).</div>
+      </div>
+    </div>
+
+    <table class="mapping-table">
+      <thead>
+        <tr>
+          <th>Vanilla</th>
+          <th></th>
+          <th>NavLogic satisfies/3</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>solve(true)</code><br><small>base case — trivially succeeds</small></td>
+          <td>&harr;</td>
+          <td><code>satisfies(_, prefer_tag(_), _)</code><br><small>preferences never block — vacuously true</small></td>
+        </tr>
+        <tr>
+          <td><code>solve((A, B))</code><br><small>pattern-match on comma functor, recurse both</small></td>
+          <td>&harr;</td>
+          <td><code>satisfies(Poi, and(Gs), T)</code><br><small>pattern-match on <code>and</code> functor, recurse all children</small></td>
+        </tr>
+        <tr>
+          <td><code>solve((A ; B))</code><br><small>pattern-match on semicolon, recurse either</small></td>
+          <td>&harr;</td>
+          <td><code>satisfies(Poi, or(Gs), T)</code><br><small>pattern-match on <code>or</code> functor, recurse any child</small></td>
+        </tr>
+        <tr>
+          <td><code>solve(\+ G)</code><br><small>negation-as-failure</small></td>
+          <td>&harr;</td>
+          <td><code>satisfies(Poi, not(G), T)</code><br><small>same — <code>\+</code> on recursive call</small></td>
+        </tr>
+        <tr>
+          <td><code>solve(G) :- clause(G, Body)</code><br><small>leaf — look up in database</small></td>
+          <td>&harr;</td>
+          <td><code>satisfies(Poi, any_tag(Ts), T)</code><br><small>leaf — look up in KB via <code>tag_active_at/3</code></small></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="eureka">
+      <h3>The Eureka Moment</h3>
+      <p>
+        In the vanilla interpreter, <code>(A, B)</code> is <strong>data shaped like a comma</strong> — the interpreter
+        sees the comma and decides to recurse. In NavLogic, <code>and([G1, G2, G3])</code> is
+        <strong>data shaped like "and"</strong> — the interpreter sees the <code>and</code> functor and decides to
+        recurse. <strong>Same pattern. Same technique. Different language being interpreted.</strong>
+        <br><br>
+        The vanilla interpreter interprets <em>Prolog</em>. <code>satisfies/3</code> interprets
+        <em>the LLM's constraint language</em>. Both work by structural recursion over data terms.
+        That's what makes them both meta-interpreters.
+      </p>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- ============================================================ -->
+  <!-- PART 3: Watch It Walk the Tree -->
+  <!-- ============================================================ -->
+  <div class="section">
+    <div class="section-label part3">Part 3 — Watch It Walk the Tree</div>
+    <h2>Evaluating a Real Goal, Node by Node</h2>
+
+    <p class="prose">
+      Let's trace a concrete goal through <code>satisfies/3</code>. The user asked for
+      <em>"a temple, but nothing weather-exposed."</em> The LLM produced this AST:
+    </p>
+
+    <div class="code-block">
+<span class="fn">satisfies</span>(wat_mangkon, <span class="kw">and</span>([<span class="tag">any_tag</span>([temple]), <span class="tag">none_tag</span>([weather_exposed])]), <span class="str">t(sat, 20, 0)</span>).</div>
+
+    <!-- SVG Tree -->
+    <div class="tree-container">
+      <div class="tree-title">Goal AST — The Data Tree That <code>satisfies/3</code> Walks <br><small>Each node is a functor the meta-interpreter pattern-matches on</small></div>
+
+      <svg class="tree-svg" width="720" height="380" viewBox="0 0 720 380">
+        <!-- Edges -->
+        <line x1="360" y1="68" x2="200" y2="155" stroke="#c5d5ea" stroke-width="2"/>
+        <line x1="360" y1="68" x2="520" y2="155" stroke="#c5d5ea" stroke-width="2"/>
+        <line x1="200" y1="200" x2="200" y2="265" stroke="#c5d5ea" stroke-width="2"/>
+        <line x1="520" y1="200" x2="520" y2="265" stroke="#c5d5ea" stroke-width="2"/>
+
+        <!-- Root: and -->
+        <rect x="290" y="30" width="140" height="46" rx="10" fill="#dbeafe" stroke="#93b5f1" stroke-width="1.5"/>
+        <text x="360" y="59" text-anchor="middle" font-family="JetBrains Mono" font-size="15" font-weight="700" fill="#2563eb">and([...])</text>
+
+        <!-- Step number -->
+        <circle cx="285" cy="36" r="13" fill="#4a6cf7"/>
+        <text x="285" y="41" text-anchor="middle" font-family="Inter" font-size="11" font-weight="700" fill="#ffffff">1</text>
+
+        <!-- Left child: any_tag -->
+        <rect x="110" y="150" width="180" height="54" rx="10" fill="#d1fae5" stroke="#86d4ad" stroke-width="1.5"/>
+        <text x="200" y="172" text-anchor="middle" font-family="JetBrains Mono" font-size="13" font-weight="700" fill="#059669">any_tag([temple])</text>
+        <text x="200" y="192" text-anchor="middle" font-family="Inter" font-size="10" fill="#5a6b83">leaf node — KB lookup</text>
+
+        <circle cx="105" cy="156" r="13" fill="#059669"/>
+        <text x="105" y="161" text-anchor="middle" font-family="Inter" font-size="11" font-weight="700" fill="#ffffff">2</text>
+
+        <!-- Right child: none_tag -->
+        <rect x="430" y="150" width="180" height="54" rx="10" fill="#fee2e2" stroke="#f5a0a0" stroke-width="1.5"/>
+        <text x="520" y="172" text-anchor="middle" font-family="JetBrains Mono" font-size="12" font-weight="700" fill="#dc2626">none_tag</text>
+        <text x="520" y="192" text-anchor="middle" font-family="JetBrains Mono" font-size="12" font-weight="700" fill="#dc2626">([weather_exposed])</text>
+
+        <circle cx="425" cy="156" r="13" fill="#dc2626"/>
+        <text x="425" y="161" text-anchor="middle" font-family="Inter" font-size="11" font-weight="700" fill="#ffffff">4</text>
+
+        <!-- Leaf: bind_tag temple check -->
+        <rect x="100" y="260" width="200" height="68" rx="10" fill="#f7f9fc" stroke="#d4e0f0" stroke-width="1.5"/>
+        <text x="200" y="284" text-anchor="middle" font-family="JetBrains Mono" font-size="11" fill="#059669" font-weight="600">bind_tag(temple, temple)</text>
+        <text x="200" y="300" text-anchor="middle" font-family="JetBrains Mono" font-size="11" fill="#5a6b83">tag_active_at(</text>
+        <text x="200" y="316" text-anchor="middle" font-family="JetBrains Mono" font-size="11" fill="#5a6b83">  wat_mangkon, temple, T)</text>
+
+        <circle cx="95" cy="266" r="13" fill="#059669"/>
+        <text x="95" y="271" text-anchor="middle" font-family="Inter" font-size="11" font-weight="700" fill="#ffffff">3</text>
+
+        <!-- Leaf: bind_tag weather check -->
+        <rect x="420" y="260" width="200" height="68" rx="10" fill="#f7f9fc" stroke="#d4e0f0" stroke-width="1.5"/>
+        <text x="520" y="284" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#dc2626" font-weight="600">bind_tag(weather_exposed,</text>
+        <text x="520" y="300" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#dc2626" font-weight="600">         weather_exposed)</text>
+        <text x="520" y="316" text-anchor="middle" font-family="JetBrains Mono" font-size="11" fill="#5a6b83">\+ tag_active_at(...)</text>
+
+        <circle cx="415" cy="266" r="13" fill="#dc2626"/>
+        <text x="415" y="271" text-anchor="middle" font-family="Inter" font-size="11" font-weight="700" fill="#ffffff">5</text>
+
+        <!-- Result annotations -->
+        <text x="330" y="345" text-anchor="middle" font-family="JetBrains Mono" font-size="12" font-weight="700" fill="#059669">&#10003; TRUE</text>
+        <text x="330" y="365" text-anchor="middle" font-family="Inter" font-size="11" fill="#5a6b83">wat_mangkon: indoor temple, not weather_exposed</text>
+
+        <!-- Legend arrow from step 3 -->
+        <text x="55" y="340" font-family="Inter" font-size="10" fill="#059669" font-weight="600">tagged(wat_mangkon,</text>
+        <text x="55" y="354" font-family="Inter" font-size="10" fill="#059669" font-weight="600">[temple, indoor, ...])</text>
+
+        <!-- Legend arrow from step 5 -->
+        <text x="555" y="345" font-family="Inter" font-size="10" fill="#dc2626" font-weight="600">indoor has no</text>
+        <text x="555" y="359" font-family="Inter" font-size="10" fill="#dc2626" font-weight="600">is_a path to</text>
+        <text x="555" y="373" font-family="Inter" font-size="10" fill="#dc2626" font-weight="600">weather_exposed</text>
+      </svg>
+    </div>
+
+    <!-- Step by step trace -->
+    <p class="prose">
+      Here's exactly what the meta-interpreter does at each numbered node. Notice:
+      <strong>at every step, it pattern-matches on the functor of the data term</strong>, just like
+      the vanilla interpreter pattern-matches on <code>(A, B)</code> vs. <code>(A ; B)</code> vs. atom.
+    </p>
+
+    <div class="trace-steps">
+      <div class="trace-step match">
+        <div class="step-title">Pattern-match: <code>and([...])</code> functor</div>
+        <div class="step-detail">
+          The second argument is <code>and([any_tag([temple]), none_tag([weather_exposed])])</code>.
+          The interpreter matches the clause <code>satisfies(Poi, <strong>and(Gs)</strong>, T)</code> and enters
+          <code>forall</code> over the list <code>Gs</code> — meaning <strong>every child must succeed</strong>.
+        </div>
+        <div class="step-code"><span class="fn">satisfies</span>(wat_mangkon, <span class="kw">and</span>([G1, G2]), t(sat,20,0)) :-
+    forall(member(G, [G1, G2]), <span class="fn">satisfies</span>(wat_mangkon, G, t(sat,20,0))).</div>
+      </div>
+
+      <div class="trace-step recurse">
+        <div class="step-title">Recurse into child 1: <code>any_tag([temple])</code></div>
+        <div class="step-detail">
+          <code>forall</code> picks <code>G = any_tag([temple])</code> and calls <code>satisfies/3</code> again.
+          This time, the interpreter matches <code>satisfies(Poi, <strong>any_tag(Ts)</strong>, T)</code> — a
+          <strong>leaf clause</strong> that grounds against the knowledge base.
+        </div>
+      </div>
+
+      <div class="trace-step leaf">
+        <div class="step-title">Leaf: ground against the KB</div>
+        <div class="step-detail">
+          At the leaf, the interpreter calls <code>bind_tag(temple, temple)</code> — Clause 1 of <code>bind_tag/2</code>
+          fires via <code>synonym('temple', temple)</code>, cut commits. Then <code>tag_active_at(wat_mangkon, temple, t(sat,20,0))</code>
+          checks: does wat_mangkon have <code>temple</code>? Yes — <code>tagged(wat_mangkon, [temple, indoor, ...])</code>
+          and <code>is_a(temple, temple)</code> by reflexivity.
+        </div>
+        <div class="step-code"><span class="cm">% This is the "clause(G, Body)" moment of the vanilla interpreter.</span>
+<span class="cm">% Instead of looking up a Prolog clause, we look up a tag in the KB.</span>
+<span class="tag">bind_tag</span>(temple, temple),               <span class="cm">% synonym binding</span>
+<span class="tag">tag_active_at</span>(wat_mangkon, temple, T).   <span class="cm">% KB lookup — succeeds ✓</span></div>
+      </div>
+
+      <div class="trace-step recurse">
+        <div class="step-title">Recurse into child 2: <code>none_tag([weather_exposed])</code></div>
+        <div class="step-detail">
+          <code>forall</code> picks the second child. The interpreter now matches
+          <code>satisfies(Poi, <strong>none_tag(Ts)</strong>, T)</code> — the <strong>negation</strong> leaf.
+          This clause asserts that <strong>no</strong> tag in the list may be present.
+        </div>
+      </div>
+
+      <div class="trace-step leaf">
+        <div class="step-title">Leaf: negated KB lookup</div>
+        <div class="step-detail">
+          <code>bind_tag(weather_exposed, weather_exposed)</code> — Clause 2 of <code>bind_tag/2</code>,
+          it's a <code>known_tag</code>. Then <code>\+ tag_active_at(wat_mangkon, weather_exposed, T)</code>:
+          does wat_mangkon have any tag that <code>is_a</code> weather_exposed? Its tags are
+          <code>[temple, indoor, religious_site, low_noise, mid_budget]</code>. None of these
+          have an <code>is_a</code> path to <code>weather_exposed</code>. Negation-as-failure succeeds.
+        </div>
+        <div class="step-code"><span class="tag">bind_tag</span>(weather_exposed, weather_exposed),   <span class="cm">% known_tag binding</span>
+\+ <span class="tag">tag_active_at</span>(wat_mangkon, weather_exposed, T).
+<span class="cm">% indoor ≠ weather_exposed, temple ≠ weather_exposed ... all fail</span>
+<span class="cm">% \+ failure = success ✓   (none_tag semantics: absence = pass)</span></div>
+      </div>
+
+      <div class="trace-step result">
+        <div class="step-title">Result: both children succeeded → <code>and</code> succeeds</div>
+        <div class="step-detail">
+          <code>forall</code> verified that every member of <code>Gs</code> satisfies. The root
+          <code>and</code> node returns <strong>true</strong>.
+          Wat Mangkon Kamalawat is a valid candidate for this goal at this time.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- ============================================================ -->
+  <!-- PART 4: Why this matters -->
+  <!-- ============================================================ -->
+  <div class="section">
+    <div class="section-label part4">Part 4 — Why This Matters</div>
+    <h2>What the Meta-Interpreter Gives Us That <code>call/1</code> Never Could</h2>
+
+    <p class="prose">
+      A student might ask: <em>"Why not just use Prolog's built-in <code>call/1</code> to execute
+      the goal directly?"</em> Three reasons — and they're all consequences of the level shift:
+    </p>
+
+    <div class="callout key">
+      <div class="callout-title">1. We Thread Extra Context</div>
+      <p>
+        Every recursive call carries <code>Poi</code> and <code>Time</code>. The vanilla <code>call/1</code>
+        has no way to inject these parameters into every level of a conjunction.
+        The meta-interpreter threads them naturally because <strong>it controls the recursion</strong>.
+      </p>
+    </div>
+
+    <div class="callout good">
+      <div class="callout-title">2. We Can Treat the Same Node Differently in Different Contexts</div>
+      <p>
+        <code>prefer_tag</code> is vacuously true during <code>satisfies/3</code> (never blocks a candidate),
+        but <code>preference_score/4</code> walks the <strong>same AST</strong> and counts actual matches.
+        One data structure, two interpretations. With <code>call/1</code>, a goal either succeeds
+        or fails — you can't give it a different semantics in a different context.
+      </p>
+    </div>
+
+    <div class="callout warn">
+      <div class="callout-title">3. We Can Structurally Transform the Goal</div>
+      <p>
+        <code>relax/4</code> uses <code>select/3</code> to <strong>remove conjuncts from the <code>and</code> list</strong>
+        and re-evaluate. <code>collect_tags/2</code> <strong>walks the tree to extract all tag literals</strong>.
+        <code>sub_goal/2</code> <strong>enumerates all sub-formulas</strong> for the audit. None of these are
+        possible if the goal is opaque bytecode inside <code>call/1</code> — they require the
+        goal to be <strong>inspectable data</strong>, which is exactly what the meta-interpreter provides.
+      </p>
+    </div>
+
+    <div class="eureka">
+      <h3>The One Sentence to Remember</h3>
+      <p>
+        A meta-interpreter is what you get when you <strong>stop executing logic and start
+        reading it</strong>. The vanilla interpreter reads Prolog's own syntax. NavLogic's
+        <code>satisfies/3</code> reads the LLM's constraint language. Both work by looking at
+        the shape of a term and recursing — the only difference is <strong>what language
+        they're interpreting</strong>.
+      </p>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
