@@ -113,6 +113,58 @@ class TimeContext(BaseModel):
     display: str
 
 
+# Fiscal reasoning — the symbolic-repair surface.
+
+class BudgetContext(BaseModel):
+    max_thb: int
+
+
+class FareSegment(BaseModel):
+    """One maximal same-agency run; exactly one fare per segment."""
+    agency: str
+    tap_in: str
+    tap_out: str
+    fare: int
+
+
+class RepairStep(BaseModel):
+    """One iteration of the diagnose→propose→replan loop.
+
+    `diagnosis` and `repair_applied` are kept as loose dicts because
+    Prolog authors them as structured terms with shape-variant content
+    (over_budget vs within_budget; avoid_specific_boundary vs
+    avoid_agency_pair vs force_single_agency vs infeasible)."""
+    diagnosis: dict
+    repair_applied: dict
+
+
+class BudgetAuditEntry(BaseModel):
+    """A candidate POI whose every repair chain still busted the budget.
+
+    `certificate` is the Prolog-authored constructive infeasibility proof
+    (repairs_exhausted, final_over_by, min_seen, and optional
+    fare_unknown / graph_disconnected witnesses)."""
+    candidate: str
+    certificate: dict
+    repair_trail: list[RepairStep] = []
+
+
+class ExploreAlternative(BaseModel):
+    """Rich explore-mode alternative — a fully-planned survivor.
+
+    When `explore: true`, PlanData.alternatives is a list of these
+    instead of a list of names: every survivor gets its own time,
+    fare, steps, and (if repair fired) repair_trail."""
+    name: str
+    station: str
+    total_time: int
+    steps: list[dict] = []
+    preference_score: int | None = None
+    total_fare: int | None = None
+    fare_breakdown: list[FareSegment] | None = None
+    repair_trail: list[RepairStep] | None = None
+
+
 class PlanData(BaseModel):
     origin: str
     destination: str | None = None
@@ -121,9 +173,15 @@ class PlanData(BaseModel):
     steps: list[dict] = []
     preference_score: int | None = None
     time_context: TimeContext | None = None
+    budget_context: BudgetContext | None = None
+    total_fare: int | None = None
+    fare_breakdown: list[FareSegment] | None = None
+    repair_trail: list[RepairStep] | None = None
+    budget_audit: list[BudgetAuditEntry] | None = None
     relaxation_note: list[str] | None = None
     audit_trail: list[AuditEntry] | None = None
-    alternatives: list[str] | None = None
+    alternatives: list[ExploreAlternative] | list[str] | None = None
+    explore: bool | None = None
     unknown_tags: list[str] | None = None
     note: str | None = None
     answer: str | None = None
