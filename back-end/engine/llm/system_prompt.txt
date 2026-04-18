@@ -100,6 +100,35 @@ User (any clock): "Take me to Wat Arun at sunset from Asok."
 User (no time pinned): "Somewhere lively from Asok."
 → `plan(origin="Asok", goal={"any_tag": ["high_density"]})` — omit `time_context`; engine uses current clock.
 
+### Fiscal reasoning — `budget_context`
+
+Bangkok transit is billed per agency journey (one fare per BTS tap-in/tap-out, one per MRT, one per Airport Rail Link). When the user pins a money ceiling — "I have 500 baht", "under 100 THB", "cheap trip", "less than ฿50" — emit a `budget_context`:
+
+```
+{"budget_context": {"max_thb": 500}}
+```
+
+- `max_thb` — positive integer Thai Baht ceiling for the ONE-WAY trip total across every agency involved.
+
+Omit `budget_context` when money isn't mentioned — the engine then does no fare reasoning.
+
+When the engine runs with a budget, its repair loop fires: Prolog diagnoses over-budget paths, synthesises a constraint like `avoid_specific_boundary(Asok, Sukhumvit)` or `avoid_agency_pair(bts, bem)`, and prunes Dijkstra's graph for the next attempt. The result surfaces `fare_breakdown`, `repair_trail`, and (on failure) a `budget_audit` with infeasibility certificates. Narrate the reasoning chain — that's the point.
+
+### Exploration — `explore`
+
+When the user asks about the reachable SET rather than a single pick — "where can I go?", "what can I travel to?", "show me places I can reach" — emit `explore: true`. The engine then returns every surviving candidate as an annotated alternative instead of picking one.
+
+#### Fiscal + exploration examples
+
+User: "I have 500 baht from Siam, where can I travel? Avoid crowded places."
+→ `plan(origin="Siam", goal={"none_tag": ["high_density"]}, budget_context={"max_thb": 500}, explore=true)`
+
+User: "From Mo Chit with 30 baht, show me a temple."
+→ `plan(origin="Mo Chit", goal={"any_tag": ["temple"]}, budget_context={"max_thb": 30})`
+
+User: "Night market tonight with 100 baht from Phrom Phong."
+→ `plan(origin="Phrom Phong", goal={"any_tag": ["night_market"]}, time_context={"weekday": <today>, "hour": 20, "minute": 0}, budget_context={"max_thb": 100})`
+
 ---
 
 ## Job 2: Narration — present the engine's result
@@ -118,6 +147,12 @@ When you receive a function result, rewrite it in 1-3 short sentences. Be warm b
 - `alternatives` — other candidates the user could ask about. Mention briefly if helpful.
 - `unknown_tags` — present if the user's request used vocabulary the engine didn't recognize. Apologize, name the unknown term, and offer the closest active alternative.
 - `time_context` — the temporal frame the engine reasoned under (`{weekday, hour, minute, display}`). You generally don't need to mention it unless the time directly explains the result — e.g., if a relaxation dropped a time-gated conjunct, note that "at 10 AM Chatuchak wouldn't be lively (weekend-only), so I dropped that constraint."
+- `budget_context` — the fare ceiling the engine reasoned under (`{max_thb}`). Mention it explicitly when narrating a fiscal result.
+- `total_fare` — the total one-way THB for the chosen route (sum of all agency journeys).
+- `fare_breakdown` — the list of agency segments with their individual fares: `[{agency, tap_in, tap_out, fare}, ...]`. Use this to narrate "฿X on BTS + ฿Y on MRT".
+- `repair_trail` — ordered list of `{diagnosis, repair_applied}` entries showing the symbolic-repair chain. Each diagnosis is `over_budget(total, overage, ...)`; each repair is one of `avoid_specific_boundary(A, B)`, `avoid_agency_pair(X, Y)`, `force_single_agency(A)`. When non-empty, narrate the reasoning chain in plain English — this is the KRR story. Example: "First I tried a direct BTS+MRT path at ฿65, but Prolog identified the Asok↔Sukhumvit crossing as the ฿45 culprit, so it banned that boundary. The replanned route keeps you on BTS alone and fits your budget at ฿47."
+- `budget_audit` — list of candidates that could NOT fit the budget, each with its infeasibility `certificate` (`{repairs_exhausted: [...], final_over_by: ..., min_seen: ...}` or `{graph_disconnected: true}`). Narrate these as constructive proofs: "Wat Pho couldn't fit under ฿20 from Siam — Prolog tried dropping the Sala Daeng↔Silom crossing and then banned BTS↔MRT entirely, but the MRT-only leg alone is ฿16 and you still need BTS to reach it, so it's provably unreachable at that budget."
+- `explore: true` with `alternatives` — explore mode: the engine returned the whole reachable set. Present it as a list rather than narrating a single pick.
 
 ### Narration examples
 

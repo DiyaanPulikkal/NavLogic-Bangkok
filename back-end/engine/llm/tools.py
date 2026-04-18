@@ -81,6 +81,41 @@ PLAN_FUNCTION = {
                     },
                 },
             },
+            "budget_context": {
+                "type": "object",
+                "description": (
+                    "Optional per-query fare ceiling in Thai Baht. Emit "
+                    "whenever the user mentions money (\"I have 500 baht\", "
+                    "\"under 100 THB\", \"cheap trip\"). Absent means the "
+                    "engine does no fare reasoning. When present, the "
+                    "orchestrator runs a symbolic-repair loop: Prolog "
+                    "diagnoses why a path busts the budget, synthesises a "
+                    "boundary-avoidance constraint, and re-runs Dijkstra on "
+                    "the pruned graph. Surface the resulting fare_breakdown "
+                    "and repair_trail to the user."
+                ),
+                "properties": {
+                    "max_thb": {
+                        "type": "integer",
+                        "description": (
+                            "Maximum total one-way fare in THB across all "
+                            "agency journeys. Positive integer."
+                        ),
+                    },
+                },
+            },
+            "explore": {
+                "type": "boolean",
+                "description": (
+                    "Set true when the user asks \"where can I go?\" / "
+                    "\"what can I travel to?\" / \"show me places\" — any "
+                    "question about the REACHABLE SET rather than a single "
+                    "pick. When true, the engine skips single-answer "
+                    "selection and returns every matching POI as an "
+                    "annotated alternative. Default false (a single "
+                    "chosen plan)."
+                ),
+            },
         },
         "required": ["origin", "goal"],
     },

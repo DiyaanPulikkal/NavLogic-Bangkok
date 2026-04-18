@@ -37,7 +37,13 @@ from difflib import SequenceMatcher
 from zoneinfo import ZoneInfo
 
 from engine.llm.llm import LLMInterface
-from engine.prolog import GoalShapeError, PrologInterface, TimeShapeError
+from engine.prolog import (
+    BudgetShapeError,
+    FareUnknownError,
+    GoalShapeError,
+    PrologInterface,
+    TimeShapeError,
+)
 
 logger = logging.getLogger("orchestrator")
 
@@ -54,6 +60,7 @@ _WEEKDAY_DISPLAY = {
 
 class Orchestrator:
     MAX_REPLAN = 3
+    MAX_REPAIRS = 3
     _MATCH_TYPE_RANK = {"exact": 0, "prefix": 1, "substring": 2}
     _BANGKOK_TZ = ZoneInfo("Asia/Bangkok")
 
@@ -62,6 +69,7 @@ class Orchestrator:
         self.prolog = PrologInterface()
         self._vocab_cache: list[str] | None = None
         self._synonyms_cache: dict[str, str] | None = None
+        self._station_agency_cache: dict[str, str] | None = None
 
     # ------------------------------------------------------------------
     # Temporal context — the per-query time frame.
@@ -80,6 +88,32 @@ class Orchestrator:
             "hour": now.hour,
             "minute": now.minute,
         }
+
+    # ------------------------------------------------------------------
+    # Fiscal context — the per-query budget ceiling (THB).
+    # ------------------------------------------------------------------
+
+    def _resolve_budget_context(self, args: dict) -> dict | None:
+        """Pull `budget_context` out of the LLM args. None when absent.
+
+        Unlike time_context, budget is not filled in with a default —
+        there is no "current budget". Absence means the user didn't
+        mention money; the repair loop simply stays dormant.
+        """
+        raw = args.get("budget_context") if isinstance(args, dict) else None
+        if raw is None:
+            return None
+        max_thb = PrologInterface._budget_to_prolog(raw)
+        if max_thb is None:
+            return None
+        return {"max_thb": max_thb}
+
+    def _station_agencies(self) -> dict[str, str]:
+        cache = getattr(self, "_station_agency_cache", None)
+        if cache is None:
+            cache = self.prolog.station_agencies()
+            self._station_agency_cache = cache
+        return cache
 
     def _resolve_time_context(self, args: dict) -> dict:
         """Canonicalize the LLM-supplied or wall-clock time_context.
@@ -186,6 +220,13 @@ class Orchestrator:
         except TimeShapeError as e:
             return self._error(f"Malformed time_context: {e}"), history
 
+        try:
+            budget_ctx = self._resolve_budget_context(args)
+        except BudgetShapeError as e:
+            return self._error(f"Malformed budget_context: {e}"), history
+
+        explore = bool(args.get("explore")) if isinstance(args, dict) else False
+
         if self._is_pure_route(goal):
             dest_raw = self._extract_route_to(goal)
             return self._handle_pure_route(origin, dest_raw, history)
@@ -212,18 +253,53 @@ class Orchestrator:
 
         edges = self.prolog.get_all_edges()
         graph = self._build_graph(edges)
+        budget_audit: list[dict] = []
         ranked: list[dict] = []
         for c in cands:
             path, cost = self._dijkstra(graph, origin, c["station"])
             if path is None:
                 continue
-            ranked.append({**c, "path": path, "cost": cost})
+            entry = {**c, "path": path, "cost": cost}
+
+            if budget_ctx is not None:
+                outcome = self._budget_repair(
+                    edges, origin, c["station"], budget_ctx["max_thb"]
+                )
+                if not outcome["success"]:
+                    budget_audit.append({
+                        "candidate": c["name"],
+                        "certificate": outcome["certificate"],
+                        "repair_trail": outcome["repair_trail"],
+                    })
+                    continue
+                entry["path"] = outcome["path"]
+                entry["cost"] = outcome["cost"]
+                entry["fare"] = outcome["fare"]
+                entry["fare_breakdown"] = outcome["segments"]
+                entry["repair_trail"] = outcome["repair_trail"]
+
+            ranked.append(entry)
+
         if not ranked:
-            return self._answer(
-                "I found matching places but none are reachable from your origin in the network."
-            ), history
+            data = {
+                "origin": origin,
+                "time_context": time_ctx,
+                "relaxation_note": relaxation_note,
+                "alternatives": [c["name"] for c in cands[:5]],
+                "note": "I found matching places but none fit your constraints (network / budget).",
+            }
+            if budget_ctx is not None:
+                data["budget_context"] = budget_ctx
+                data["budget_audit"] = budget_audit
+            return self._format({"type": "plan", "data": data}, history)
 
         ranked.sort(key=lambda r: (-r["pref_score"], r["cost"]))
+
+        if explore:
+            return self._handle_explore(
+                origin, ranked, time_ctx, budget_ctx, budget_audit,
+                relaxation_note, history,
+            )
 
         chosen, audit_trail = self._select_via_audit(ranked, goal)
 
@@ -236,6 +312,9 @@ class Orchestrator:
                 "alternatives": [r["name"] for r in ranked[:5]],
                 "note": "Every candidate route violated one of your hard constraints.",
             }
+            if budget_ctx is not None:
+                data["budget_context"] = budget_ctx
+                data["budget_audit"] = budget_audit
             return self._format({"type": "plan", "data": data}, history)
 
         data = {
@@ -252,7 +331,212 @@ class Orchestrator:
                 r["name"] for r in ranked[:5] if r["name"] != chosen["name"]
             ],
         }
+        if budget_ctx is not None:
+            data["budget_context"] = budget_ctx
+            data["total_fare"] = chosen.get("fare")
+            data["fare_breakdown"] = chosen.get("fare_breakdown")
+            data["repair_trail"] = chosen.get("repair_trail")
+            data["budget_audit"] = budget_audit
         return self._format({"type": "plan", "data": data}, history)
+
+    def _handle_explore(
+        self,
+        origin: str,
+        survivors: list[dict],
+        time_ctx: dict,
+        budget_ctx: dict | None,
+        budget_audit: list[dict],
+        relaxation_note: list[str] | None,
+        history: list,
+    ) -> tuple[dict, list]:
+        """Explore mode: return every survivor as an annotated alternative.
+
+        Bypasses _select_via_audit — explore questions ("where can I
+        go?") are asking for the reachable set, not a single pick.
+        """
+        alternatives: list[dict] = []
+        for r in survivors[:10]:
+            entry = {
+                "name": r["name"],
+                "station": r["station"],
+                "total_time": r["cost"],
+                "steps": self.prolog.build_route_steps(r["path"]),
+                "preference_score": r["pref_score"],
+            }
+            if "fare" in r:
+                entry["total_fare"] = r["fare"]
+                entry["fare_breakdown"] = r["fare_breakdown"]
+                entry["repair_trail"] = r["repair_trail"]
+            alternatives.append(entry)
+        data: dict = {
+            "origin": origin,
+            "time_context": time_ctx,
+            "relaxation_note": relaxation_note,
+            "explore": True,
+            "alternatives": alternatives,
+        }
+        if budget_ctx is not None:
+            data["budget_context"] = budget_ctx
+            data["budget_audit"] = budget_audit
+        return self._format({"type": "plan", "data": data}, history)
+
+    # ------------------------------------------------------------------
+    # Symbolic repair — the fiscal sibling of _select_via_audit.
+    #
+    # Prolog supervises Dijkstra: each failure is diagnosed back into a
+    # structured constraint, which Python translates into an edge prune
+    # before the next Dijkstra iteration. The loop terminates when a
+    # path fits the budget, when the graph disconnects under pruning,
+    # or when the repair hierarchy is exhausted.
+    # ------------------------------------------------------------------
+
+    def _budget_repair(
+        self,
+        edges: list[tuple[str, str, int]],
+        origin: str,
+        destination: str,
+        budget_max: int,
+    ) -> dict:
+        """Run the repair loop for a single (origin, destination) pair.
+
+        Returns a dict with one of two shapes:
+          {"success": True, "path": [...], "cost": int, "fare": int,
+           "segments": [...], "repair_trail": [...]}
+          {"success": False, "certificate": {...}, "repair_trail": [...]}
+
+        `repair_trail` records, in order, what Prolog diagnosed and which
+        constraint Python applied. This is the audit artifact surfaced
+        to the user — "here's the reasoning chain that proved it
+        (in)feasible."
+        """
+        tried: list[dict] = []
+        trail: list[dict] = []
+        last_diagnosis: dict | str | None = None
+
+        for _ in range(self.MAX_REPAIRS + 1):
+            graph = self._build_graph_with_pruning(edges, tried)
+            path, cost = self._dijkstra(graph, origin, destination)
+
+            if path is None:
+                last_diagnosis = "graph_disconnected"
+                cert = self.prolog.explain_infeasibility(trail, last_diagnosis)
+                return {
+                    "success": False,
+                    "certificate": cert,
+                    "repair_trail": trail,
+                }
+
+            try:
+                diag = self.prolog.diagnose_budget(path, budget_max)
+            except FareUnknownError as e:
+                logger.warning("Fare unknown while repairing: %s", e)
+                return {
+                    "success": False,
+                    "certificate": {
+                        "kind": "certificate",
+                        "fare_unknown": {
+                            "agency": e.agency,
+                            "origin": e.origin,
+                            "destination": e.destination,
+                        },
+                    },
+                    "repair_trail": trail,
+                }
+
+            if diag["kind"] == "within_budget":
+                segments, fare = self.prolog.trip_fare(path)
+                return {
+                    "success": True,
+                    "path": path,
+                    "cost": cost,
+                    "fare": fare,
+                    "segments": segments,
+                    "repair_trail": trail,
+                }
+
+            last_diagnosis = diag
+            try:
+                repair = self.prolog.propose_repair(path, budget_max, tried)
+            except FareUnknownError as e:
+                logger.warning("Fare unknown proposing repair: %s", e)
+                return {
+                    "success": False,
+                    "certificate": {
+                        "kind": "certificate",
+                        "fare_unknown": {
+                            "agency": e.agency,
+                            "origin": e.origin,
+                            "destination": e.destination,
+                        },
+                    },
+                    "repair_trail": trail,
+                }
+
+            if repair["kind"] == "infeasible":
+                cert = self.prolog.explain_infeasibility(trail, diag)
+                return {
+                    "success": False,
+                    "certificate": cert,
+                    "repair_trail": trail,
+                }
+
+            tried.append(repair)
+            trail.append({"diagnosis": diag, "repair_applied": repair})
+
+        cert = self.prolog.explain_infeasibility(
+            trail, last_diagnosis if last_diagnosis else "graph_disconnected"
+        )
+        return {"success": False, "certificate": cert, "repair_trail": trail}
+
+    def _build_graph_with_pruning(
+        self,
+        edges: list[tuple[str, str, int]],
+        repairs: list[dict],
+    ) -> dict[str, list[tuple[str, int]]]:
+        """Project the edge set through the current repair constraints.
+
+        Each repair term prunes a specific edge family:
+          avoid_specific_boundary(A, B)  — the literal edge A↔B
+          avoid_agency_pair(X, Y)        — every edge whose endpoints
+                                           sit in agencies X and Y
+          force_single_agency(A)         — every edge whose endpoints
+                                           are not both in agency A
+        The numeric Dijkstra operates on the surviving subgraph, so
+        fare-conscious routing is achieved entirely through symbolic
+        pruning — the search weight remains minutes.
+        """
+        if not repairs:
+            return self._build_graph(edges)
+        agencies = self._station_agencies()
+        survivors: list[tuple[str, str, int]] = []
+        for a, b, t in edges:
+            if any(
+                self._edge_violates_repair(a, b, agencies, r) for r in repairs
+            ):
+                continue
+            survivors.append((a, b, t))
+        return self._build_graph(survivors)
+
+    @staticmethod
+    def _edge_violates_repair(
+        a: str, b: str, agencies: dict[str, str], repair: dict
+    ) -> bool:
+        kind = repair.get("kind")
+        if kind == "avoid_specific_boundary":
+            return (a == repair["a"] and b == repair["b"]) or (
+                a == repair["b"] and b == repair["a"]
+            )
+        if kind == "avoid_agency_pair":
+            ag_a = agencies.get(a)
+            ag_b = agencies.get(b)
+            if ag_a is None or ag_b is None:
+                return False
+            target = {repair["a"], repair["b"]}
+            return {ag_a, ag_b} == target and ag_a != ag_b
+        if kind == "force_single_agency":
+            ag = repair["agency"]
+            return agencies.get(a) != ag or agencies.get(b) != ag
+        return False
 
     def _select_via_audit(
         self, ranked: list[dict], goal: dict

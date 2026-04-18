@@ -28,6 +28,7 @@ in dependency order.
 
 :- consult('ontology.pl').
 :- consult('rules.pl').
+:- consult('fares.pl').
 
 /* ==================================================================
    1. Graph topology
