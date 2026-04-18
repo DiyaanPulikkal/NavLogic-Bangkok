@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>How NavLogic Thinks — A Study Guide</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161a22;
+    --panel-2: #1d222c;
+    --ink: #e7ecf3;
+    --ink-soft: #aab3c1;
+    --accent: #7cc4ff;
+    --accent-2: #ffd166;
+    --good: #8ce99a;
+    --bad: #ff8fa3;
+    --border: #2a2f3a;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.65;
+    font-size: 17px;
+  }
+  .wrap {
+    max-width: 820px;
+    margin: 0 auto;
+    padding: 56px 24px 120px;
+  }
+  header.hero {
+    margin-bottom: 48px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 32px;
+  }
+  .eyebrow {
+    color: var(--accent);
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-size: 12px;
+    margin-bottom: 12px;
+  }
+  h1 {
+    font-size: 42px;
+    line-height: 1.15;
+    margin: 0 0 16px;
+    letter-spacing: -0.02em;
+  }
+  .lede {
+    font-size: 19px;
+    color: var(--ink-soft);
+    margin: 0;
+  }
+  h2 {
+    font-size: 26px;
+    margin: 56px 0 16px;
+    letter-spacing: -0.01em;
+    border-left: 4px solid var(--accent);
+    padding-left: 14px;
+  }
+  h3 {
+    font-size: 20px;
+    margin: 32px 0 10px;
+    color: var(--ink);
+  }
+  p { margin: 0 0 14px; }
+  ul, ol { margin: 0 0 18px; padding-left: 22px; }
+  li { margin-bottom: 8px; }
+  strong { color: #fff; }
+  em { color: var(--ink-soft); }
+  code {
+    background: #0b0d12;
+    border: 1px solid var(--border);
+    padding: 1px 7px;
+    border-radius: 5px;
+    font-family: "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
+    font-size: 0.88em;
+    color: var(--accent-2);
+  }
+  pre {
+    background: #0b0d12;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+    overflow-x: auto;
+    font-family: "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
+    font-size: 14px;
+    line-height: 1.55;
+    color: #d5d9e0;
+    margin: 0 0 20px;
+  }
+  pre code {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    color: inherit;
+  }
+  .cast {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+    margin: 22px 0 8px;
+  }
+  .character {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px 24px;
+    display: flex;
+    gap: 18px;
+    align-items: flex-start;
+  }
+  .avatar {
+    font-size: 34px;
+    line-height: 1;
+    flex-shrink: 0;
+    width: 52px;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--panel-2);
+    border-radius: 12px;
+    border: 1px solid var(--border);
+  }
+  .character h3 { margin: 0 0 4px; }
+  .character .role {
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    letter-spacing: 0.04em;
+  }
+  .character p { margin: 0 0 6px; color: var(--ink-soft); }
+  .character p.trait { color: var(--ink); }
+
+  .flow {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px 24px;
+    margin: 18px 0 24px;
+    font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 14.5px;
+    color: var(--ink-soft);
+  }
+  .flow .step { margin: 4px 0; }
+  .flow .arrow { color: var(--accent); margin: 0 8px; }
+
+  .callout {
+    background: var(--panel-2);
+    border-left: 4px solid var(--accent-2);
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin: 18px 0 24px;
+    color: var(--ink-soft);
+  }
+  .callout strong { color: var(--accent-2); }
+
+  .scene {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px 26px;
+    margin: 22px 0;
+  }
+  .scene .tag {
+    display: inline-block;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #0b0d12;
+    background: var(--accent);
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-weight: 700;
+    margin-bottom: 10px;
+  }
+  .scene h3 { margin-top: 4px; }
+
+  .poi-list {
+    list-style: none;
+    padding: 0;
+    margin: 14px 0 0;
+  }
+  .poi-list li {
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 8px;
+    background: var(--panel-2);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .poi-list .mark { font-size: 18px; }
+  .poi-list .ok { color: var(--good); }
+  .poi-list .no { color: var(--bad); }
+  .poi-list .reason { color: var(--ink-soft); font-size: 14px; margin-left: auto; }
+
+  .wrap-up {
+    background: linear-gradient(180deg, rgba(124,196,255,0.08), rgba(124,196,255,0.02));
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px 28px;
+    margin-top: 40px;
+  }
+  .wrap-up h2 { border: 0; padding: 0; margin-top: 0; }
+
+  .footnote {
+    color: var(--ink-soft);
+    font-size: 14px;
+    margin-top: 48px;
+    border-top: 1px solid var(--border);
+    padding-top: 16px;
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+
+    <header class="hero">
+      <div class="eyebrow">NavLogic Bangkok · Study Guide</div>
+      <h1>How the Reasoning Engine Actually Thinks</h1>
+      <p class="lede">A plain-English tour of the three-person team behind every route recommendation — a chatty translator, a strict rulebook, and the manager who keeps them honest.</p>
+    </header>
+
+    <h2>Meet the Team</h2>
+    <p>The engine isn't a single brain. It's three specialists who only work well together. Each one is <em>great</em> at one thing and <em>bad</em> at the others — and that's the whole point.</p>
+
+    <div class="cast">
+
+      <div class="character">
+        <div class="avatar">🗣️</div>
+        <div>
+          <h3>The Translator</h3>
+          <div class="role">Gemini (the LLM)</div>
+          <p class="trait">Charming. Fluent in messy human.</p>
+          <p>Understands "I'm starving and kinda bored" just fine. But if you ask it to count stations or add up fares, it will confidently get it wrong. So we never let it do math, and we never let it pick a route. Its only job is to turn <em>sloppy sentences</em> into a <em>clean structured request</em>.</p>
+        </div>
+      </div>
+
+      <div class="character">
+        <div class="avatar">🛡️</div>
+        <div>
+          <h3>The Rulebook</h3>
+          <div class="role">Prolog (the knowledge base)</div>
+          <p class="trait">Pedantic. Never improvises. Never wrong.</p>
+          <p>Knows every station, every line, every fare, every tag on every attraction. If you ask "is Wat Pho an outdoor temple?" it answers yes or no — no opinions, no vibes. It's also the one that <em>explains why</em> an option fails. It will happily reject a perfectly nice candidate because a rule says so.</p>
+        </div>
+      </div>
+
+      <div class="character">
+        <div class="avatar">🧭</div>
+        <div>
+          <h3>The Navigator</h3>
+          <div class="role">Python (the orchestrator)</div>
+          <p class="trait">The manager. Carries the map.</p>
+          <p>Stands between the Translator and the Rulebook, passing messages back and forth. Also does the one thing Prolog isn't built for: <em>drawing the actual route on the subway map</em> — the shortest-path math that turns "go from A to B" into "BTS green line, 4 stops, change at Siam." It also keeps the loop bounded so nobody reasons forever.</p>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="callout">
+      <strong>The one rule that binds them:</strong> the Translator never decides anything important. It translates the question in, narrates the answer out. Everything in between is deterministic — either Prolog rules or map math. That's what makes the answers defensible instead of vibes.
+    </div>
+
+    <h2>The Pipeline, at a Glance</h2>
+
+    <div class="flow">
+      <div class="step">🗣️ messy text<span class="arrow">→</span>Translator turns it into a structured goal</div>
+      <div class="step">🧭 Navigator passes the goal to the Rulebook</div>
+      <div class="step">🛡️ Rulebook lists candidates that satisfy the goal</div>
+      <div class="step">🧭 Navigator draws the shortest route to each candidate</div>
+      <div class="step">🛡️ Rulebook audits each route — may reject some</div>
+      <div class="step">🧭 Navigator picks the survivor and hands it back</div>
+      <div class="step">🗣️ Translator narrates the result in friendly English</div>
+    </div>
+
+    <p>Now let's run a real question through it, step by step.</p>
+
+    <h2>The Master Walkthrough 🏛️</h2>
+
+    <p>The user types, in plain Bangkok-tourist English:</p>
+
+    <pre><code>"I want to visit a temple, but I hate the heat."</code></pre>
+
+    <p>That sentence is a mess. It's vague ("the heat"?), it mixes a <em>want</em> with an <em>aversion</em>, and it doesn't say where the person is starting from. A human understands it instantly. A shortest-path algorithm has no idea what to do with it. Watch what happens.</p>
+
+    <div class="scene">
+      <span class="tag">Step 1 · Translator</span>
+      <h3>🗣️ Turn the sentence into a structured goal</h3>
+      <p>The Translator reads the sentence and produces — not an answer, but a <strong>recipe</strong>. Something the Rulebook can evaluate. It looks roughly like this:</p>
+<pre><code>{
+  origin: "Asok",                 // filled from context
+  goal: and(
+    all_tag(["temple"]),          // must be a temple
+    none_tag(["weather_exposed"]) // must NOT be outdoors in the heat
+  )
+}</code></pre>
+      <p>Notice what just happened. "I hate the heat" became <code>none_tag(["weather_exposed"])</code>. The Translator didn't <em>pick</em> a temple — it didn't even look at the list of temples. It just re-expressed the wish in the Rulebook's vocabulary and handed it off.</p>
+      <p><em>This is the whole neural contribution. From here on, nothing is guessed.</em></p>
+    </div>
+
+    <div class="scene">
+      <span class="tag">Step 2 · Navigator</span>
+      <h3>🧭 Carry the goal to the Rulebook</h3>
+      <p>The Navigator takes that structured goal and politely walks it over to Prolog. It asks a single question:</p>
+      <p><em>"Give me every place in the city that matches this goal."</em></p>
+      <p>Note what the Navigator does <strong>not</strong> do here. It does not start browsing the map. It does not guess which temple is closest. It waits for the Rulebook to produce the candidate list first. Route-drawing comes later.</p>
+    </div>
+
+    <div class="scene">
+      <span class="tag">Step 3 · Rulebook</span>
+      <h3>🛡️ Filter the city using facts and synonyms</h3>
+      <p>Now the Rulebook wakes up. It has three things to do.</p>
+
+      <p><strong>(a) Normalise the words.</strong> The tag <code>temple</code> is known — good, it stays as <code>temple</code>. If the user had typed "sweaty," the Rulebook has a synonym table that would rewrite it into <code>weather_exposed</code> automatically. If the user had typed something nobody's ever heard before — "aesthetic" — the Rulebook wraps it as <code>unknown('aesthetic')</code> rather than silently ignoring it. Known, renamed, or flagged. Never dropped.</p>
+
+      <p><strong>(b) Use the family tree of tags.</strong> The Rulebook knows that <code>buddhist_temple</code> <em>is a</em> <code>temple</code>. So a place tagged specifically <code>buddhist_temple</code> still qualifies, even though the user just said "temple." This is called subsumption — thinking in categories, not exact strings.</p>
+
+      <p><strong>(c) Walk the list and apply the goal.</strong> For each known attraction, it checks: does it have <code>temple</code> (or something that is-a temple)? And does it <em>not</em> have <code>weather_exposed</code>? Only those that answer yes-and-no-respectively survive.</p>
+
+      <p>The result is a small, honest list:</p>
+
+      <ul class="poi-list">
+        <li><span class="mark ok">✓</span> <strong>Wat Mangkon Kamalawat</strong><span class="reason">temple ✓ · indoor ✓</span></li>
+        <li><span class="mark ok">✓</span> <strong>Erawan Shrine</strong><span class="reason">temple ✓ · covered ✓</span></li>
+        <li><span class="mark no">✗</span> <strong>Wat Pho</strong><span class="reason">temple ✓ · but outdoor ✗</span></li>
+        <li><span class="mark no">✗</span> <strong>Wat Arun</strong><span class="reason">temple ✓ · but outdoor ✗</span></li>
+      </ul>
+
+      <p>Notice there are no vibes here. Wat Pho is famous and beautiful — but it's tagged <code>weather_exposed</code>, so it's out. The Rulebook does not care how beloved a place is.</p>
+    </div>
+
+    <div class="scene">
+      <span class="tag">Step 4 · Navigator</span>
+      <h3>🧭 Draw the physical route to each survivor</h3>
+      <p>Now the Navigator finally gets to use the map. For each surviving candidate, it runs a classic shortest-path search through the station graph — tallying minutes, counting transfers, building a step list like <em>"ride BTS Sukhumvit 3 stops, transfer at Siam, ride BTS Silom 2 stops, walk to Erawan Shrine."</em></p>
+      <p>Every survivor gets a full route. Not just the closest one — all of them. Because we're about to let the Rulebook have one more look.</p>
+    </div>
+
+    <div class="scene">
+      <span class="tag">Step 5 · Rulebook (again)</span>
+      <h3>🛡️ Audit each route for hidden rule-breaks</h3>
+      <p>This is the step most systems skip — and it's the most interesting one.</p>
+      <p>Some constraints can't be enforced at filter time, because they depend on <em>how you get there</em>, not on the destination. "I hate the heat" is exactly that. A perfectly indoor shrine might be reached via an <em>open-air walkway transfer</em> that leaves you sweating for five minutes. The destination passed the filter. The route didn't.</p>
+      <p>So the Rulebook looks at each proposed route and checks it against the same rules again — not just the endpoint. If it finds a problem, it <strong>rejects that candidate entirely</strong> and tells the Navigator why.</p>
+      <p>Say the best route to Erawan Shrine uses a long outdoor walkway. The Rulebook says:</p>
+      <pre><code>reject: Erawan Shrine
+reason: transfer at Ratchadamri crosses weather_exposed walkway</code></pre>
+      <p>The Navigator adds Erawan Shrine to a blacklist and goes back to step 4 with the next candidate. This loop is bounded — it won't run forever — but it will try a few alternatives before giving up. That's the <em>audit loop</em>, and it's the engine's secret weapon: <strong>the Rulebook gets to veto the map.</strong></p>
+    </div>
+
+    <div class="scene">
+      <span class="tag">Step 6 · Navigator → Translator</span>
+      <h3>🧭 → 🗣️ Hand back the survivor and narrate it</h3>
+      <p>After the audit, one clean winner remains: <strong>Wat Mangkon Kamalawat</strong>, reached via an all-indoor route through MRT Blue. The Navigator packages up the answer — origin, destination, steps, time, any rejected options and why — and hands it to the Translator.</p>
+      <p>The Translator's last job is the one it's good at: writing a friendly human sentence.</p>
+      <pre><code>"Head to Wat Mangkon Kamalawat — it's a beautiful
+Chinese-Thai temple reachable entirely through the
+air-conditioned MRT Blue line. About 22 minutes from
+Asok, no outdoor walking. I skipped Erawan Shrine
+because the transfer there crosses an open walkway."</code></pre>
+      <p>Everything in that paragraph is grounded in a structured fact the Rulebook produced. The Translator didn't invent the route, didn't invent the rejection reason, didn't invent the time. It just put a nice wrapper on the truth.</p>
+    </div>
+
+    <h2>Why This Division of Labour Matters</h2>
+
+    <p>If you squint, the whole engine is one sentence: <strong>let each specialist do only what it's good at, and make them check each other's work.</strong></p>
+
+    <ul>
+      <li><strong>The Translator is allowed to be creative</strong> — because the Rulebook is going to vet everything it suggests.</li>
+      <li><strong>The Rulebook is allowed to be rigid</strong> — because the Translator softens the edges for the human on the other end.</li>
+      <li><strong>The Navigator is allowed to be boring</strong> — just shortest paths, no judgment — because the Rulebook gets veto power after the fact.</li>
+    </ul>
+
+    <p>When something goes wrong, you can always point to which one got it wrong and why. That's the part that makes this a reasoning engine rather than "a chatbot that happens to know subway stations."</p>
+
+    <div class="wrap-up">
+      <h2>One-Sentence Recap</h2>
+      <p style="margin-bottom:0;">The Translator converts "<em>I want a temple but I hate the heat</em>" into a precise logical wish, the Navigator carries that wish to the Rulebook and asks who qualifies, the Rulebook filters candidates by tags and synonyms, the Navigator draws the shortest subway route to each survivor, the Rulebook audits the routes and vetoes any that secretly break the rules, and the Translator tells you — in plain English — which temple to go to and why the others were ruled out.</p>
+    </div>
+
+    <p class="footnote">That's the reasoning engine. No databases, no servers, no buttons — just three specialists passing notes until one good answer falls out.</p>
+
+  </div>
+</body>
+</html>
